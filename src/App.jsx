@@ -311,6 +311,7 @@ function ShiftEntry({ data, user, reload }) {
   const [notes, setNotes] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [toast, setToast] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => { if (!componentId && components[0]) setComponentId(components[0].id); }, [components]);
   useEffect(() => { if (!machineId && machines[0]) setMachineId(machines[0].id); }, [machines]);
@@ -322,10 +323,16 @@ function ShiftEntry({ data, user, reload }) {
   // BUSINESS RULE: flag duplicate for same operator/component/shift/date
   const dup = entries.find((e) => e.production_date === date && e.shift === shift && e.component_id === componentId && e.operator_id === user.id);
 
-  const open = () => { if (componentId && qty >= 0) setConfirm(true); };
+  const open = () => { if (componentId && qty >= 0) { setError(""); setConfirm(true); } };
   const doSave = async () => {
-    await db.addEntry({ production_date: date, shift, component_id: componentId, machine_id: machineId || null, operator_id: user.id, quantity: Number(qty), scrap_qty: Number(scrap), notes: notes.trim() });
-    setConfirm(false); setQty(0); setScrap(0); setNotes("");
+    try {
+      await db.addEntry({ production_date: date, shift, component_id: componentId, machine_id: machineId || null, operator_id: user.id, quantity: Number(qty), scrap_qty: Number(scrap), notes: notes.trim() });
+    } catch (e) {
+      // e.g. the DB duplicate guard (23505) — surface it instead of failing silently.
+      setError(e?.message || "Could not save this entry. Please try again.");
+      return;
+    }
+    setError(""); setConfirm(false); setQty(0); setScrap(0); setNotes("");
     setToast(`Recorded ${compName(componentId)} · ${shift ? "Shift " + shift : ""}`); setTimeout(() => setToast(""), 1800);
     await reload();
   };
@@ -424,6 +431,7 @@ function ShiftEntry({ data, user, reload }) {
               {notes && <div className="text-sm pt-1"><span className="text-slate-400 font-medium">Notes</span><div className="text-slate-700 mt-0.5">{notes}</div></div>}
             </div>
             {dup && <div className={`${warnCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>A matching entry already exists for this shift. Confirm only if this is additional output.</span></div>}
+            {error && <div className={`${errCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>{error}</span></div>}
             <div className="flex gap-3">
               <button onClick={() => setConfirm(false)} className="flex-1 py-3.5 rounded-2xl bg-slate-100 font-bold text-slate-600 active:scale-95 transition">Cancel</button>
               <button onClick={doSave} className="flex-1 py-3.5 rounded-2xl bg-indigo-500 text-white font-bold active:scale-95 transition flex items-center justify-center gap-2"><Check size={18} /> Confirm</button>
@@ -517,6 +525,7 @@ const labelCls = "block text-slate-500 text-sm font-semibold mb-1.5";
 const btnPrimary = "w-full py-3.5 rounded-2xl bg-indigo-500 text-white font-bold flex items-center justify-center gap-2 active:scale-95 transition shadow-md";
 const hintCls = "text-xs text-slate-500 bg-slate-50 rounded-xl px-3 py-2.5 leading-relaxed";
 const warnCls = "flex items-center gap-2 text-sm text-amber-700 bg-amber-50 px-3 py-2.5 rounded-xl leading-snug";
+const errCls = "flex items-center gap-2 text-sm text-rose-700 bg-rose-50 px-3 py-2.5 rounded-xl leading-snug";
 
 function Kpi({ title, value, unit, Icon, color, soft, foot, footColor }) {
   return (

@@ -12,7 +12,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const url = process.env.SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const OPERATOR_SECRET = "prana-operator-v1"; // MUST match supabaseClient.js
+const OPERATOR_SECRET = process.env.OPERATOR_SECRET || "prana-operator-v1"; // MUST match supabaseClient.js / VITE_OPERATOR_SECRET
 
 if (!url || !serviceKey) {
   console.error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.");
@@ -46,9 +46,12 @@ async function ensureUser(email, password, profile) {
   if (error && !String(error.message).toLowerCase().includes("already")) throw error;
   let id = data?.user?.id;
   if (!id) {
-    const list = await admin.auth.admin.listUsers();
+    // User already existed — find them. perPage bumped past the default 50 so a
+    // re-run still finds existing users once you grow beyond one page.
+    const list = await admin.auth.admin.listUsers({ perPage: 1000 });
     id = list.data.users.find((u) => u.email === email)?.id;
   }
+  if (!id) throw new Error(`Could not create or find auth user ${email}`);
   await admin.from("users").upsert({ id, ...profile });
   return id;
 }
@@ -76,12 +79,11 @@ async function main() {
   // 3) Monthly plan for the current month
   const now = new Date();
   const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  const plans = components.map((c) => ({
-    month: monthStr,
-    component_id: comps.find((x) => x.code === c.code).id,
-    target_qty: c.target,
-    working_days: 26,
-  }));
+  const plans = components.map((c) => {
+    const comp = comps.find((x) => x.code === c.code);
+    if (!comp) throw new Error(`Component ${c.code} missing after upsert — cannot build its monthly plan.`);
+    return { month: monthStr, component_id: comp.id, target_qty: c.target, working_days: 26 };
+  });
   await admin.from("monthly_plans").upsert(plans, { onConflict: "month,component_id" });
 
   // 4) ~1 week of production entries (skips tonight's Shift 3)
