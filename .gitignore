@@ -4,6 +4,10 @@ dist-ssr
 *.local
 .env
 .env.local
+
+# Production secrets / generated credentials — NEVER commit these
+company.config.json
+CREDENTIALS.txt
 .vite
 .DS_Store
 npm-debug.log*

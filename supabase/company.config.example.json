@@ -1,0 +1,25 @@
+{
+  "_comment": "Copy this file to company.config.json (same folder) and replace with YOUR real people, machines, and components. company.config.json is gitignored. industry must be one of: railway, wind, marine, other (or omit it).",
+
+  "appUrl": "https://your-app.vercel.app",
+  "setupCurrentMonthPlan": true,
+
+  "operators": [
+    { "name": "Ravi Kumar",   "pin": "4821" },
+    { "name": "Suresh Patil", "pin": "7390" },
+    { "name": "Lakshmi Devi", "pin": "5163" }
+  ],
+
+  "managers": [
+    { "name": "Anita Rao",   "username": "anita", "role": "supervisor" },
+    { "name": "Plant Admin", "username": "admin", "role": "admin" }
+  ],
+
+  "machines": ["CNC-01", "CNC-02", "CNC-03", "CNC-04"],
+
+  "components": [
+    { "code": "CP-100",  "name": "Clamping Plate",  "industry": "railway", "target": 200, "workingDays": 26 },
+    { "code": "WHF-22",  "name": "Wind Hub Flange", "industry": "wind",    "target": 120, "workingDays": 26 },
+    { "code": "MC-07",   "name": "Marine Coupling", "industry": "marine",  "target": 80,  "workingDays": 26 }
+  ]
+}

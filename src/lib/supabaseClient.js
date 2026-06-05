@@ -20,8 +20,13 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // Operators sign in with PIN-as-password. To satisfy the min-password-length
 // rule and add a little entropy, the real auth password is PIN + this secret.
-// IT MUST MATCH the value used by the seed (seed.mjs / seed.sql).
-const OPERATOR_SECRET = "prana-operator-v1";
+// IT MUST MATCH the value used by the seed (VITE_OPERATOR_SECRET here ==
+// OPERATOR_SECRET in seed.prod.mjs). For production, set VITE_OPERATOR_SECRET
+// in your .env / Vercel to a long random string. The default below is for the
+// local demo only. NOTE: this value ships in the browser bundle, so it raises
+// the bar against casual PIN-guessing but is not a true server secret — the
+// real protection is Row-Level Security + strong manager passwords.
+const OPERATOR_SECRET = import.meta.env.VITE_OPERATOR_SECRET || "prana-operator-v1";
 
 const CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 // `supabase` is null in local demo mode; db methods below are simply not called then.
