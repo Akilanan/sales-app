@@ -156,6 +156,24 @@ export const db = {
     if (error) throw error;
     return data;
   },
+  // ---- REALTIME ------------------------------------------------------------
+  // Live cross-device sync. Calls `onChange` whenever production_entries,
+  // monthly_plans, or components change in Postgres — RLS still filters which
+  // rows each client receives (operators: own entries; managers: all), and the
+  // subsequent reload is RLS-scoped too, so nobody ever sees data they shouldn't.
+  // `onStatus(connected)` reports the live state for a UI indicator. Returns an
+  // unsubscribe function. No-op in local/demo mode.
+  subscribe(onChange, onStatus) {
+    if (!supabase) return () => {};
+    const channel = supabase
+      .channel("prana-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "production_entries" }, onChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "monthly_plans" }, onChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "components" }, onChange)
+      .subscribe((status) => { if (onStatus) onStatus(status === "SUBSCRIBED"); });
+    return () => { supabase.removeChannel(channel); };
+  },
+
   async signOut() {
     await supabase.auth.signOut();
   },

@@ -154,5 +154,6 @@ export const db = {
     await store.write("production_entries", rows.filter((e) => e.id !== id));
   },
   async listAuditTrail() { return []; },      // demo: no server-side audit
+  subscribe() { return () => {}; },           // demo: single-device, no live sync
   async signOut() { /* no session in demo mode */ },
 };

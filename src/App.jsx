@@ -319,6 +319,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [view, setView] = useState("dashboard");
   const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [] });
+  const [live, setLive] = useState(false); // realtime connection state (supabase mode)
 
   const appStatus = useMemo(() => {
     const totalMonthly = data.plans.reduce((s, p) => s + p.target_qty, 0);
@@ -340,6 +341,19 @@ export default function App() {
   const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); await loadData(); };
   const logout = async () => { try { await db.signOut(); } catch { /* ignore */ } setUser(null); setView("dashboard"); };
 
+  // LIVE SYNC — once signed in, refresh (debounced) whenever anyone logs output
+  // or changes a plan/component on any device. RLS keeps each client's data
+  // scoped; the reload is RLS-scoped too. No-op in local/demo mode.
+  useEffect(() => {
+    if (!user) { setLive(false); return; }
+    let t;
+    const unsub = db.subscribe(
+      () => { clearTimeout(t); t = setTimeout(loadData, 350); },
+      (connected) => setLive(connected)
+    );
+    return () => { clearTimeout(t); setLive(false); unsub(); };
+  }, [user, loadData]);
+
   if (booting)
     return (
       <div className="min-h-[100dvh] grid place-items-center relative overflow-hidden">
@@ -358,7 +372,7 @@ export default function App() {
 
   return (
     <div className="min-h-[100dvh] text-ink relative">
-      <Header user={user} view={view} setView={setView} logout={logout} status={appStatus} />
+      <Header user={user} view={view} setView={setView} logout={logout} status={appStatus} live={live} />
       <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-7 sm:py-9">
         <AnimatePresence mode="wait">
           <motion.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
@@ -508,7 +522,7 @@ function LoginScreen({ onLogin }) {
 }
 
 /* ------------------------------ Header ------------------------------------ */
-function Header({ user, view, setView, logout, status }) {
+function Header({ user, view, setView, logout, status, live }) {
   const tabs = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["supervisor", "admin"] },
     { id: "entry", label: "Shift Entry", icon: ClipboardList, roles: ["operator", "supervisor", "admin"] },
@@ -538,6 +552,15 @@ function Header({ user, view, setView, logout, status }) {
         </nav>
 
         <div className="flex items-center gap-3 order-2 sm:order-3">
+          {live && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-ok-ink" title="Live — data updates in real time across devices">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-ok opacity-75 motion-safe:animate-ping" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-ok" />
+              </span>
+              Live
+            </span>
+          )}
           <div className="font-semibold text-sm text-ink-soft">{user.name}</div>
           <button onClick={logout} title="Log out" aria-label="Log out" className="p-2.5 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><LogOut size={18} /></button>
         </div>
