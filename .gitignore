@@ -3,7 +3,8 @@ dist
 dist-ssr
 *.local
 .env
-.env.local
+.env.*
+!.env.example
 
 # Production secrets / generated credentials — NEVER commit these
 company.config.json
@@ -15,3 +16,9 @@ yarn-debug.log*
 yarn-error.log*
 
 .vercel
+
+# Local design scratch — screenshots, references, tool output (not the app)
+/*.png
+.playwright-mcp/
+.refs/
+.claude/

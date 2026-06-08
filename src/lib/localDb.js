@@ -5,7 +5,7 @@
 // lines up with production.
 
 const SHIFTS = [1, 2, 3];
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => new Date().toLocaleDateString("en-CA"); // LOCAL date — must match App.jsx (not UTC)
 const curMonth = () => todayStr().slice(0, 7);
 const monthToDate = (m) => `${m}-01`;
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -48,16 +48,23 @@ export async function seedIfEmpty() {
       { id: uid(), name: "Admin", role: "admin", login_code: null, username: "admin", password: "admin123", active: true },
     ];
     const machines = ["CNC-01", "CNC-02", "CNC-03", "CNC-04"].map((code) => ({ id: uid(), code, name: code, active: true }));
+    // `perf` = each line's pace vs plan, so the demo board shows a believable
+    // spread (one critical line dragging the floor, two behind, two on/ahead) and
+    // exercises the whole green/amber/red status system — not a flat amber wall.
     const seed = [
-      { code: "CP-100", name: "Clamping Plate", industry: "railway", target: 200, wd: 26 },
-      { code: "WHF-22", name: "Wind Hub Flange", industry: "wind", target: 120, wd: 26 },
-      { code: "MC-07", name: "Marine Coupling", industry: "marine", target: 80, wd: 26 },
-      { code: "RAB-15", name: "Rail Axle Bush", industry: "railway", target: 300, wd: 26 },
-      { code: "WBR-09", name: "Wind Brake Disc", industry: "wind", target: 150, wd: 26 },
+      // perf is calibrated so the board still shows green AFTER today's partial day
+      // (shift 3 isn't logged yet, which trims ~5% off every line's pace).
+      { code: "CP-100", name: "Clamping Plate", industry: "railway", target: 1240, wd: 24, perf: 0.74 }, // critical — the problem line
+      { code: "WHF-22", name: "Wind Hub Flange", industry: "wind", target: 760, wd: 25, perf: 1.16 },   // clearly ahead of pace
+      { code: "MC-07", name: "Marine Coupling", industry: "marine", target: 425, wd: 26, perf: 0.90 },  // behind
+      { code: "RAB-15", name: "Rail Axle Bush", industry: "railway", target: 980, wd: 24, perf: 1.10 }, // on track
+      { code: "WBR-09", name: "Wind Brake Disc", industry: "wind", target: 612, wd: 25, perf: 0.85 },   // behind
     ];
     const components = seed.map((c) => ({ id: uid(), code: c.code, name: c.name, industry: c.industry, active: true }));
     const month = monthToDate(curMonth());
     const monthly_plans = components.map((c, i) => ({ id: uid(), month, component_id: c.id, target_qty: seed[i].target, working_days: seed[i].wd }));
+    const perfBy = {};
+    components.forEach((c, i) => { perfBy[c.id] = seed[i].perf; });
 
     const operators = users.filter((u) => u.role === "operator");
     const entries = [];
@@ -68,12 +75,13 @@ export async function seedIfEmpty() {
       components.forEach((c) => {
         const p = monthly_plans.find((x) => x.component_id === c.id);
         const perShift = (p.target_qty / p.working_days) / 3;
+        const perf = perfBy[c.id] || 1; // line's intended pace
         SHIFTS.forEach((s) => {
           if (ds === todayStr() && s === 3) return;
           entries.push({
             id: uid(), production_date: ds, shift: s, component_id: c.id,
             machine_id: randOf(machines).id, operator_id: randOf(operators).id,
-            quantity: Math.max(0, Math.round(perShift * (0.7 + Math.random() * 0.6))),
+            quantity: Math.max(0, Math.round(perShift * perf * (0.9 + Math.random() * 0.2))),
             scrap_qty: Math.random() < 0.2 ? 1 : 0, notes: "", created_at: Date.now() - back * 86400000,
           });
         });
