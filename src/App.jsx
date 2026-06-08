@@ -139,6 +139,14 @@ const PANEL = "bg-panel border border-hair shadow-card";
 // gradient + brighter top hairline so the upper edge catches light — the fix for
 // "reads flat/dark at top". Used sparingly (overuse = template tell).
 const PANEL_HERO = "bg-gradient-to-b from-panelhi to-panel border border-hair shadow-hero";
+// Pointer-follow spotlight: writes the cursor's local x/y into CSS vars on the
+// card (no React re-render). Pair with the `spotlight` class; the glow itself is
+// CSS-gated to fine-pointer desktops, so shop-floor touch tablets never paint it.
+const spotlightMove = (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.style.setProperty("--mx", `${e.clientX - r.left}px`);
+  e.currentTarget.style.setProperty("--my", `${e.clientY - r.top}px`);
+};
 const containerV = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
 const itemV = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } } };
 
@@ -368,21 +376,29 @@ export default function App() {
         </div>
       </div>
     );
-  if (!user) return <LoginScreen onLogin={onLogin} />;
-
+  // Cinematic threshold: login blur-fades out, the app fades in, and the PRANA
+  // wordmark (shared layoutId) flies from the login lockup into the header nav.
   return (
-    <div className="min-h-[100dvh] text-ink relative">
-      <Header user={user} view={view} setView={setView} logout={logout} status={appStatus} live={live} />
-      <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-7 sm:py-9">
-        <AnimatePresence mode="wait">
-          <motion.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
-            {view === "dashboard" && <Dashboard data={data} />}
-            {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
-            {view === "plan" && <PlanSetup data={data} reload={loadData} />}
-          </motion.div>
-        </AnimatePresence>
-      </main>
-    </div>
+    <AnimatePresence mode="wait">
+      {!user ? (
+        <motion.div key="login" exit={{ opacity: 0, filter: "blur(8px)" }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
+          <LoginScreen onLogin={onLogin} />
+        </motion.div>
+      ) : (
+        <motion.div key="app" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="min-h-[100dvh] text-ink relative">
+          <Header user={user} view={view} setView={setView} logout={logout} status={appStatus} live={live} />
+          <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-7 sm:py-9">
+            <AnimatePresence mode="wait">
+              <motion.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
+                {view === "dashboard" && <Dashboard data={data} live={live} />}
+                {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
+                {view === "plan" && <PlanSetup data={data} reload={loadData} />}
+              </motion.div>
+            </AnimatePresence>
+          </main>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -456,10 +472,10 @@ function LoginScreen({ onLogin }) {
       {/* RIGHT — solid form panel (subtle top-down depth to match the cards) */}
       <section className="relative flex items-center justify-center px-6 py-10 sm:px-10 bg-gradient-to-b from-[#121620] to-coal min-h-[100dvh]">
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} className="w-full max-w-[360px]">
-          {/* mobile-only brand header */}
-          <div className="lg:hidden mb-9">
+          {/* brand lockup — the shared-layout source that flies into the header on sign-in */}
+          <motion.div layoutId="prana-mark" className="mb-8">
             <Wordmark />
-          </div>
+          </motion.div>
 
           <div className="mb-7">
             <Eyebrow className="mb-3">Sign in</Eyebrow>
@@ -533,9 +549,9 @@ function Header({ user, view, setView, logout, status, live }) {
       {/* faint brand accent at the very top edge — kills the flat-top read */}
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/45 to-transparent" aria-hidden="true" />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center">
+        <motion.div layoutId="prana-mark" className="flex items-center">
           <Wordmark />
-        </div>
+        </motion.div>
 
         {/* underline indicator (not a solid pill) — Linear/Stripe-caliber; the
             mobile pill wrapper stays for tap density, desktop goes chrome-less */}
@@ -570,7 +586,7 @@ function Header({ user, view, setView, logout, status, live }) {
 }
 
 /* ------------------------------ Dashboard --------------------------------- */
-function Dashboard({ data }) {
+function Dashboard({ data, live }) {
   const { components, plans, entries } = data;
   const planFor = (cid) => plans.find((p) => p.component_id === cid);
 
@@ -641,8 +657,9 @@ function Dashboard({ data }) {
         <span className="text-ink-soft text-[13px]">{new Date().toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })}</span>
       </div>
 
-      {/* GLANCE STATUS — read "are we on track?" in 2 seconds */}
-      <div className={`relative overflow-hidden ${PANEL_HERO} rounded-[14px] mb-5`}>
+      {/* GLANCE STATUS — read "are we on track?" in 2 seconds. The traveling
+          BorderBeam appears only while the realtime connection is live. */}
+      <div className={`relative overflow-hidden ${PANEL_HERO} ${live ? "border-beam" : ""} rounded-[14px] mb-5`}>
         <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: STATUS[lvl].hex }} />
         <Crosshair className="absolute top-4 right-4" />
         <div className="p-6 pl-8 pr-10 flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
@@ -1110,8 +1127,8 @@ function Kpi({ title, value, unit, sub, subLevel, pct, pctNeutral, spark, sparkL
   const sc = sparkLevel ? STATUS[sparkLevel].hex : HEX.brand;
   const sparkId = `kpi-${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
   return (
-    <motion.div variants={itemV} whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300, damping: 22 }}
-      className={`${PANEL} rounded-[14px] p-5 hover:bg-inset/40 hover:border-brand-500/40 hover:shadow-card-hover transition`}>
+    <motion.div variants={itemV} whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300, damping: 22 }} onPointerMove={spotlightMove}
+      className={`spotlight overflow-hidden [contain:content] ${PANEL} rounded-[14px] p-5 hover:bg-inset/40 hover:border-brand-500/40 hover:shadow-card-hover transition`}>
       <Eyebrow className="!text-[11px]">{title}</Eyebrow>
       <div className="mt-2.5 flex items-baseline gap-1.5">
         <span className="font-mono text-[32px] font-bold leading-none tnum text-ink">{typeof value === "number" ? <AnimatedNumber value={value} /> : value}</span>
@@ -1141,7 +1158,7 @@ function Kpi({ title, value, unit, sub, subLevel, pct, pctNeutral, spark, sparkL
 }
 
 const Panel = ({ title, right, tag, children, className = "", hero = false }) => (
-  <div className={`${hero ? PANEL_HERO : PANEL} rounded-[14px] p-5 ${className}`}>
+  <div onPointerMove={hero ? spotlightMove : undefined} className={`${hero ? `${PANEL_HERO} spotlight` : PANEL} rounded-[14px] p-5 ${className}`}>
     <div className="flex items-center justify-between gap-3 mb-5">
       <div className="flex items-center gap-2.5">
         {tag && <span className="font-mono text-[10px] text-ink-dim border border-hair rounded px-1.5 py-0.5 tracking-wider">{tag}</span>}

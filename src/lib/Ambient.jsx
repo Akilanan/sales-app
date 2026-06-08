@@ -31,6 +31,22 @@ function spindleProfile() {
   ];
 }
 
+// One-shot boot dolly — the camera eases forward (z 7.2 -> 6.2) on mount so the
+// login "boots like an instrument". Isolated from the spindle; runs only while
+// the canvas is visible (frameloop is parked offscreen). Hero route only.
+function BootDolly() {
+  const camera = useThree((s) => s.camera);
+  const armed = useRef(false);
+  useEffect(() => { camera.position.z = 7.2; armed.current = true; }, [camera]);
+  useFrame((_, dt) => {
+    if (!armed.current) return;
+    if (Math.abs(camera.position.z - 6.2) > 0.002) {
+      camera.position.z += (6.2 - camera.position.z) * Math.min(dt, 0.05) * 2.4;
+    }
+  });
+  return null;
+}
+
 function Spindle({ status = "ok", scale = 1 }) {
   const tilt = useRef();
   const spin = useRef();
@@ -119,6 +135,7 @@ export default function Ambient({ status = "ok", variant = "ambient" }) {
         {/* live FPS-driven DPR — crisp on desktop, survivable on weak/throttling tablets */}
         <PerformanceMonitor onIncline={() => setDpr(2)} onDecline={() => setDpr(1)} flipflops={3} onFallback={() => setDpr(1)} />
         <AdaptiveEvents />
+        {hero && <BootDolly />}
 
         <fog attach="fog" args={[FOG, 6.5, 11]} />
         <ambientLight intensity={0.32} />

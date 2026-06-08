@@ -119,6 +119,66 @@ input[type="number"]::-webkit-outer-spin-button {
 .tnum {
   font-variant-numeric: tabular-nums;
 }
+
+/* Spotlight — a faint Klein-blue halo that follows the cursor across a card.
+   A JS handler writes pointer x/y to --mx/--my (no React re-render). Fine-pointer
+   desktops only; shop-floor touch tablets never paint it. */
+.spotlight {
+  position: relative;
+}
+@media (hover: hover) and (pointer: fine) {
+  .spotlight::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(
+      420px circle at var(--mx, -40%) var(--my, -40%),
+      rgba(47, 75, 255, 0.13),
+      transparent 45%
+    );
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .spotlight:hover::after {
+    opacity: 1;
+  }
+}
+
+/* BorderBeam — one Klein-blue light traveling the rounded border of the single
+   live panel, signaling realtime. Masked to a 1px ring; freezes to a static arc
+   under reduced-motion via the global belt above. */
+@property --beam-a {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.border-beam::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--beam-a),
+    transparent 0 70%,
+    #2f4bff 84%,
+    #6273ff 90%,
+    transparent 96%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: beam-spin 4.5s linear infinite;
+}
+@keyframes beam-spin {
+  to {
+    --beam-a: 360deg;
+  }
+}
 /* dark native date picker */
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(0.85);
