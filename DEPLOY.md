@@ -3,6 +3,17 @@
 Goal: run this app **24/7 for the whole company, free of cost**, with a **unique
 strong login for every employee**, reachable from anywhere over the internet.
 
+> ## ⚠️ UPDATES since this runbook was first written (2026-06-08) — read first
+> Three things changed; the phases below still apply except where these override:
+>
+> 1. **HOST = Cloudflare Pages, NOT Vercel.** Vercel's free tier *prohibits commercial use* (this is a company tool), so Phase 4 below is replaced by: dash.cloudflare.com → Workers & Pages → Create → Pages → **Connect to Git** → pick `Akilanan/prana-production-app` → preset **Vite**, build `npm run build`, output `dist` → add the env vars → Save & Deploy. (Same env vars as Phase 4, **minus** `VITE_OPERATOR_SECRET` — see #3.) Supabase stays the backend.
+> 2. **Real-time is enabled.** Migration `0004_enable_realtime.sql` is applied; the dashboard updates live across devices. Also applied: `0003_lockdown_security_definer_functions.sql` (security hardening). Nothing to do — just don't skip these two if you ever rebuild the DB.
+> 3. **The operator PIN secret moved SERVER-SIDE** (out of the public bundle) into the `operator-login` Edge Function. So:
+>    - **DROP `VITE_OPERATOR_SECRET`** from the frontend env (Cloudflare) — the app no longer reads it.
+>    - **SET it as an Edge Function secret instead:** Supabase → Edge Functions → **Manage secrets** → add `OPERATOR_SECRET` = the **same** long random value you pass to the seed (Phase 0.2 / 2.2). Or CLI: `supabase secrets set OPERATOR_SECRET=<value> --project-ref czfhyqvpfulpwpsgempf`.
+>    - The seed (`npm run seed:prod`) is **unchanged** — it still uses `OPERATOR_SECRET` from your terminal; that value must equal the function secret.
+>    - After seeding + setting the secret, **verify one operator PIN login** on the live site (this is the only path that can't be tested before go-live).
+
 ## Architecture (what runs where)
 
 ```

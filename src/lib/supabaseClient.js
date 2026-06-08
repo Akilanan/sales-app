@@ -18,22 +18,17 @@ import { createClient } from "@supabase/supabase-js";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Operators sign in with PIN-as-password. To satisfy the min-password-length
-// rule and add a little entropy, the real auth password is PIN + this secret.
-// IT MUST MATCH the value used by the seed (VITE_OPERATOR_SECRET here ==
-// OPERATOR_SECRET in seed.prod.mjs). For production, set VITE_OPERATOR_SECRET
-// in your .env / Vercel to a long random string. The default below is for the
-// local demo only. NOTE: this value ships in the browser bundle, so it raises
-// the bar against casual PIN-guessing but is not a true server secret — the
-// real protection is Row-Level Security + strong manager passwords.
-const OPERATOR_SECRET = import.meta.env.VITE_OPERATOR_SECRET || "prana-operator-v1";
+// The operator PIN secret NO LONGER ships in the bundle. loginByPin() POSTs the
+// PIN to the `operator-login` Edge Function, which holds OPERATOR_SECRET as a
+// server secret, signs the operator in, and returns the session. See
+// supabase/functions/operator-login. (Set the OPERATOR_SECRET function secret to
+// the same value the seed uses.)
 
 const CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 // `supabase` is null in local demo mode; db methods below are simply not called then.
 export const supabase = CONFIGURED ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 // --- internal helpers -------------------------------------------------------
-const pinToEmail = (pin) => `${String(pin).trim()}@operator.prana.app`;
 const userToEmail = (u) =>
   String(u).includes("@") ? String(u).trim() : `${String(u).trim()}@prana.app`;
 const toMs = (t) => (t ? Date.parse(t) : Date.now()); // UI sorts created_at numerically
@@ -54,12 +49,20 @@ export async function seedIfEmpty() {}
 export const db = {
   // ---- AUTH ----------------------------------------------------------------
   async loginByPin(pin) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: pinToEmail(pin),
-      password: `${String(pin).trim()}${OPERATOR_SECRET}`,
+    // The PIN goes to the operator-login Edge Function (which holds the secret
+    // server-side and returns a session) — the secret never ships in the bundle.
+    const { data, error } = await supabase.functions.invoke("operator-login", {
+      body: { pin: String(pin).trim() },
     });
-    if (error || !data?.user) return null;
-    const p = await profileOf(data.user.id);
+    if (error || !data?.access_token || !data?.refresh_token) return null;
+    const { error: sErr } = await supabase.auth.setSession({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+    });
+    if (sErr) return null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const p = await profileOf(user.id);
     return p && p.role === "operator" && p.active ? p : null;
   },
 
