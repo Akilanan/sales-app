@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { motion, AnimatePresence, useMotionValue, useTransform, useSpring, animate } from "framer-motion";
+import { m, AnimatePresence, useMotionValue, useTransform, useSpring, animate } from "framer-motion";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Cell, AreaChart, Area, ReferenceLine, LabelList,
@@ -158,7 +158,7 @@ function AnimatedNumber({ value }) {
     const controls = animate(mv, Number(value) || 0, { duration: 0.9, ease: [0.22, 1, 0.36, 1] });
     return () => controls.stop();
   }, [value]);
-  return <motion.span>{text}</motion.span>;
+  return <m.span>{text}</m.span>;
 }
 
 // Brand is carried by the Archivo wordmark — no symbol/gem (those read AI).
@@ -203,9 +203,9 @@ function Magnetic({ children, strength = 0.3, className = "" }) {
   };
   const reset = () => { x.set(0); y.set(0); };
   return (
-    <motion.div ref={ref} onMouseMove={move} onMouseLeave={reset} style={{ x: sx, y: sy }} className={className}>
+    <m.div ref={ref} onMouseMove={move} onMouseLeave={reset} style={{ x: sx, y: sy }} className={className}>
       {children}
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -217,15 +217,15 @@ function SplitReveal({ lines, className = "" }) {
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.035, delayChildren: 0.12 } } };
   const letter = { hidden: { y: "0.5em", opacity: 0, filter: "blur(6px)" }, show: { y: 0, opacity: 1, filter: "blur(0px)", transition: { type: "spring", stiffness: 300, damping: 24 } } };
   return (
-    <motion.span variants={container} initial="hidden" animate="show" aria-hidden="true" className={className}>
+    <m.span variants={container} initial="hidden" animate="show" aria-hidden="true" className={className}>
       {lines.map((line, li) => (
         <span key={li} className="block">
           {line.split("").map((ch, i) => (
-            <motion.span key={i} variants={letter} className="inline-block whitespace-pre">{ch}</motion.span>
+            <m.span key={i} variants={letter} className="inline-block whitespace-pre">{ch}</m.span>
           ))}
         </span>
       ))}
-    </motion.span>
+    </m.span>
   );
 }
 
@@ -381,22 +381,22 @@ export default function App() {
   return (
     <AnimatePresence mode="wait">
       {!user ? (
-        <motion.div key="login" exit={{ opacity: 0, filter: "blur(8px)" }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
+        <m.div key="login" exit={{ opacity: 0, filter: "blur(8px)" }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
           <LoginScreen onLogin={onLogin} />
-        </motion.div>
+        </m.div>
       ) : (
-        <motion.div key="app" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="min-h-[100dvh] text-ink relative">
+        <m.div key="app" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="min-h-[100dvh] text-ink relative">
           <Header user={user} view={view} setView={setView} logout={logout} status={appStatus} live={live} />
           <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-7 sm:py-9">
             <AnimatePresence mode="wait">
-              <motion.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
+              <m.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
                 {view === "dashboard" && <Dashboard data={data} live={live} />}
                 {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
                 {view === "plan" && <PlanSetup data={data} reload={loadData} />}
-              </motion.div>
+              </m.div>
             </AnimatePresence>
           </main>
-        </motion.div>
+        </m.div>
       )}
     </AnimatePresence>
   );
@@ -409,10 +409,10 @@ function Heartbeat() {
   const d = "M0 26 H86 l8 -15 l10 28 l9 -34 l10 40 l8 -19 H148 l7 -10 l9 20 l8 -10 H300";
   return (
     <svg viewBox="0 0 300 52" className="w-full max-w-[300px] h-10 text-brand-400" fill="none" preserveAspectRatio="none" aria-hidden="true">
-      <motion.path d={d} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+      <m.path d={d} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
         initial={{ pathLength: 0, opacity: 0 }} animate={{ pathLength: 1, opacity: 0.9 }}
         transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1], delay: 0.35 }} />
-      <motion.circle r="2.6" fill="currentColor"
+      <m.circle r="2.6" fill="currentColor"
         initial={{ cx: 0, cy: 26, opacity: 0 }} animate={{ cx: 300, opacity: [0, 1, 1, 0] }}
         transition={{ duration: 3.2, ease: "linear", delay: 1.9, repeat: Infinity, repeatDelay: 1.4 }} />
     </svg>
@@ -433,12 +433,12 @@ function LoginScreen({ onLogin }) {
 
   // Solid keys — flat fills, hairline borders, tactile press. No glass, no glow.
   const Key = ({ children, onClick, variant, label }) => (
-    <motion.button onClick={onClick} aria-label={label}
+    <m.button onClick={onClick} aria-label={label}
       whileTap={{ scale: 0.95 }} transition={{ type: "spring", stiffness: 400, damping: 25, mass: 0.6 }}
       className={`h-16 rounded-xl grid place-items-center text-2xl font-semibold transition-colors ${
         variant === "go" ? "bg-brand-500 text-white hover:bg-brand-600 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)]"
         : variant === "back" ? "bg-inset border border-hair text-ink-soft hover:text-ink hover:border-white/15"
-        : "bg-inset border border-hair text-ink font-mono hover:border-brand-500/55 hover:bg-white/[0.04]"}`}>{children}</motion.button>
+        : "bg-inset border border-hair text-ink font-mono hover:border-brand-500/55 hover:bg-white/[0.04]"}`}>{children}</m.button>
   );
 
   const modes = [["operator", "Operator"], ["manager", "Manager"]];
@@ -471,11 +471,11 @@ function LoginScreen({ onLogin }) {
 
       {/* RIGHT — solid form panel (subtle top-down depth to match the cards) */}
       <section className="relative flex items-center justify-center px-6 py-10 sm:px-10 bg-gradient-to-b from-[#121620] to-coal min-h-[100dvh]">
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} className="w-full max-w-[360px]">
+        <m.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} className="w-full max-w-[360px]">
           {/* brand lockup — the shared-layout source that flies into the header on sign-in */}
-          <motion.div layoutId="prana-mark" className="mb-8">
+          <m.div layoutId="prana-mark" className="mb-8">
             <Wordmark />
-          </motion.div>
+          </m.div>
 
           <div className="mb-7">
             <Eyebrow className="mb-3">Sign in</Eyebrow>
@@ -485,7 +485,7 @@ function LoginScreen({ onLogin }) {
 
           {/* segmented toggle — sliding indicator */}
           <div className="relative grid grid-cols-2 p-1 rounded-xl bg-inset border border-hair mb-6">
-            <motion.div className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-lg bg-brand-500"
+            <m.div className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-lg bg-brand-500"
               animate={{ x: mode === "operator" ? 0 : "100%" }} transition={{ type: "spring", stiffness: 380, damping: 32 }} />
             {modes.map(([id, label]) => (
               <button key={id} onClick={() => { setMode(id); setErr(""); }} aria-pressed={mode === id} className={`relative z-10 min-h-[44px] py-3 rounded-lg text-sm font-semibold transition-colors ${mode === id ? "text-white" : "text-ink-soft hover:text-ink"}`}>{label}</button>
@@ -494,11 +494,11 @@ function LoginScreen({ onLogin }) {
 
           <AnimatePresence mode="wait">
             {mode === "operator" ? (
-              <motion.div key="op" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={{ duration: 0.22 }}>
+              <m.div key="op" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={{ duration: 0.22 }}>
                 <label className={labelCls}>PIN</label>
                 <div className="h-14 mb-4 rounded-xl bg-inset border border-hair flex items-center justify-center gap-3">
                   {pin.length === 0 ? <span className="font-mono text-ink-dim text-[11px] uppercase tracking-[0.28em]">Enter PIN</span> :
-                    pin.split("").map((_, i) => <motion.span key={i} initial={{ scale: 0.2, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 500, damping: 28 }} className="w-3 h-3 rounded-full bg-brand-400" />)}
+                    pin.split("").map((_, i) => <m.span key={i} initial={{ scale: 0.2, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 500, damping: 28 }} className="w-3 h-3 rounded-full bg-brand-400" />)}
                 </div>
                 <div className="grid grid-cols-3 gap-2.5">
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => <Key key={n} onClick={() => press(String(n))}>{n}</Key>)}
@@ -506,9 +506,9 @@ function LoginScreen({ onLogin }) {
                   <Key onClick={() => press("0")}>0</Key>
                   <Key onClick={pinLogin} variant="go" label="Enter PIN"><ArrowRight size={24} /></Key>
                 </div>
-              </motion.div>
+              </m.div>
             ) : (
-              <motion.div key="mgr" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={{ duration: 0.22 }} className="space-y-4">
+              <m.div key="mgr" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={{ duration: 0.22 }} className="space-y-4">
                 <div>
                   <label className={labelCls}>Username</label>
                   <input value={username} onChange={(e) => { setUsername(e.target.value); setErr(""); }} placeholder="anita / admin" className={inputCls} />
@@ -518,12 +518,12 @@ function LoginScreen({ onLogin }) {
                   <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setErr(""); }} onKeyDown={(e) => e.key === "Enter" && credLogin()} placeholder="••••••••" className={inputCls} />
                 </div>
                 <Magnetic className="w-full"><button onClick={credLogin} className="group w-full py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)]">Log in <ArrowRight size={18} className="transition-transform duration-300 ease-[cubic-bezier(.34,1.56,.64,1)] group-hover:translate-x-1" /></button></Magnetic>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
           <AnimatePresence>
-            {err && <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div className={`${errCls} mt-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></motion.div>}
+            {err && <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div className={`${errCls} mt-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></m.div>}
           </AnimatePresence>
 
           {MODE === "local" && (
@@ -531,7 +531,7 @@ function LoginScreen({ onLogin }) {
               DEMO ACCESS · PIN <span className="text-ink-soft">1001</span> · MANAGER <span className="text-ink-soft">admin / admin123</span>
             </div>
           )}
-        </motion.div>
+        </m.div>
       </section>
     </main>
   );
@@ -549,9 +549,9 @@ function Header({ user, view, setView, logout, status, live }) {
       {/* faint brand accent at the very top edge — kills the flat-top read */}
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/45 to-transparent" aria-hidden="true" />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
-        <motion.div layoutId="prana-mark" className="flex items-center">
+        <m.div layoutId="prana-mark" className="flex items-center">
           <Wordmark />
-        </motion.div>
+        </m.div>
 
         {/* underline indicator (not a solid pill) — Linear/Stripe-caliber; the
             mobile pill wrapper stays for tap density, desktop goes chrome-less */}
@@ -560,7 +560,7 @@ function Header({ user, view, setView, logout, status, live }) {
             const a = view === t.id;
             return (
               <button key={t.id} onClick={() => setView(t.id)} aria-current={a ? "page" : undefined} className={`relative flex-1 sm:flex-none px-4 sm:px-5 py-2.5 min-h-[44px] rounded-lg sm:rounded-none text-sm font-semibold transition ${a ? "text-ink" : "text-ink-soft hover:text-ink"}`}>
-                {a && <motion.span layoutId="navpill" className="absolute left-3 right-3 -bottom-[5px] h-[2px] rounded-full bg-brand-500" transition={{ type: "spring", stiffness: 380, damping: 32 }} />}
+                {a && <m.span layoutId="navpill" className="absolute left-3 right-3 -bottom-[5px] h-[2px] rounded-full bg-brand-500" transition={{ type: "spring", stiffness: 380, damping: 32 }} />}
                 <span className="relative z-10">{t.label}</span>
               </button>
             );
@@ -679,7 +679,7 @@ function Dashboard({ data, live }) {
           </div>
         </div>
         <div className="relative h-1.5 bg-inset">
-          <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(monthlyPct, 100)}%` }} transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }} className="h-full" style={{ background: STATUS[lvl].hex }} />
+          <m.div initial={{ width: 0 }} animate={{ width: `${Math.min(monthlyPct, 100)}%` }} transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }} className="h-full" style={{ background: STATUS[lvl].hex }} />
           {[25, 50, 75].map((t) => <span key={t} className="absolute top-0 bottom-0 w-px bg-base/70" style={{ left: `${t}%` }} />)}
         </div>
       </div>
@@ -687,12 +687,12 @@ function Dashboard({ data, live }) {
       {/* Balanced 4-tile metric strip — each a distinct cut (live · momentum ·
           quality · time), differentiated by micro-viz (gauge / sparkline / rate /
           progress) so they read intentional, not stamped clones. */}
-      <motion.div variants={containerV} initial="hidden" animate="show" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+      <m.div variants={containerV} initial="hidden" animate="show" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
         <Kpi title="Produced today" value={actualToday} unit={`/ ${dailyTargetRounded}`} sub={`${dailyPct}% of today's target`} subLevel={levelForPct(dailyPct)} pct={dailyPct} />
         <Kpi title="Avg / working day" value={avgPerDay} unit="units" sub={`over ${workingDaysElapsed} day${workingDaysElapsed === 1 ? "" : "s"} so far`} spark={sparkDaily} sparkLevel={lvl} />
         <Kpi title="Scrap (MTD)" value={scrapMonthly} unit="units" sub={`${scrapRate.toFixed(1)}% of total output`} subLevel={scrapRate > 3 ? "warn" : null} pct={Math.min((scrapRate / 5) * 100, 100)} pctNeutral />
         <Kpi title="Working days left" value={workingDaysLeft} unit={`/ ${totalWorkingDays}`} sub={`${monthProgress}% of the month elapsed`} pct={monthProgress} pctNeutral />
-      </motion.div>
+      </m.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-5">
         <Panel title="Pace vs Plan — by Component" tag="01" hero className="lg:col-span-7" right={
@@ -985,8 +985,8 @@ function ShiftEntry({ data, user, reload }) {
 
       <AnimatePresence>
         {confirm && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-base/85 p-4" onClick={closeConfirm}>
-            <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ type: "spring", stiffness: 360, damping: 30 }} className="bg-over border border-hair-strong relative overflow-hidden rounded-[14px] border-l-2 border-l-brand-500 p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
+          <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-base/85 p-4" onClick={closeConfirm}>
+            <m.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ type: "spring", stiffness: 360, damping: 30 }} className="bg-over border border-hair-strong relative overflow-hidden rounded-[14px] border-l-2 border-l-brand-500 p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4"><h3 id="confirm-title" className="font-display font-bold text-lg">Confirm entry</h3><button onClick={closeConfirm} aria-label="Close" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06]"><X size={18} /></button></div>
               <div className="space-y-2.5 mb-5">
                 {[["Date", date], ["Shift", `Shift ${shift}`], ["Component", compName(componentId)], ["Machine", machName(machineId)], ["Quantity", `${qty} units`], ["Scrap", `${scrap} units`]].map(([k, v]) => (
@@ -1000,20 +1000,20 @@ function ShiftEntry({ data, user, reload }) {
                 <button onClick={closeConfirm} disabled={saving} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</button>
                 <button onClick={doSave} disabled={saving} className="flex-1 py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{saving ? "Saving…" : <><Check size={18} /> Confirm</>}</button>
               </div>
-            </motion.div>
-          </motion.div>
+            </m.div>
+          </m.div>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {toast && (
-          <motion.div role="status" aria-live="polite" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} className="fixed bottom-5 right-5 z-50 bg-coal border border-hair border-l-2 border-l-ok rounded-r-md shadow-pop px-4 py-3 flex items-center gap-3">
+          <m.div role="status" aria-live="polite" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} className="fixed bottom-5 right-5 z-50 bg-coal border border-hair border-l-2 border-l-ok rounded-r-md shadow-pop px-4 py-3 flex items-center gap-3">
             <span className="w-5 h-5 rounded-full bg-ok grid place-items-center shrink-0"><Check size={13} className="text-[#0B0D12]" /></span>
             <div>
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">Logged</div>
               <div className="text-ink font-semibold text-sm">{toast}</div>
             </div>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </>
@@ -1112,7 +1112,7 @@ function Meter({ pct, level, height = "h-2.5", ticks = false, color }) {
   const fill = color || (level ? STATUS[level].hex : HEX.brand);
   return (
     <div className={`relative w-full ${height} bg-inset rounded-[2px] overflow-hidden`}>
-      <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(pct, 100)}%` }} transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }} className="h-full rounded-[1px]" style={{ background: fill }} />
+      <m.div initial={{ width: 0 }} animate={{ width: `${Math.min(pct, 100)}%` }} transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }} className="h-full rounded-[1px]" style={{ background: fill }} />
       {ticks && [25, 50, 75].map((t) => <span key={t} className="absolute top-0 bottom-0 w-px bg-base/70" style={{ left: `${t}%` }} />)}
     </div>
   );
@@ -1127,7 +1127,7 @@ function Kpi({ title, value, unit, sub, subLevel, pct, pctNeutral, spark, sparkL
   const sc = sparkLevel ? STATUS[sparkLevel].hex : HEX.brand;
   const sparkId = `kpi-${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
   return (
-    <motion.div variants={itemV} whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300, damping: 22 }} onPointerMove={spotlightMove}
+    <m.div variants={itemV} whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300, damping: 22 }} onPointerMove={spotlightMove}
       className={`spotlight overflow-hidden [contain:content] ${PANEL} rounded-[14px] p-5 hover:bg-inset/40 hover:border-brand-500/40 hover:shadow-card-hover transition`}>
       <Eyebrow className="!text-[11px]">{title}</Eyebrow>
       <div className="mt-2.5 flex items-baseline gap-1.5">
@@ -1153,7 +1153,7 @@ function Kpi({ title, value, unit, sub, subLevel, pct, pctNeutral, spark, sparkL
           </ResponsiveContainer>
         </div>
       )}
-    </motion.div>
+    </m.div>
   );
 }
 
