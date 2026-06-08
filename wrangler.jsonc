@@ -1,0 +1,12 @@
+{
+  // Cloudflare Workers config — deploys Prana as an ASSETS-ONLY static site
+  // (no Worker script / no `main`). `npm run build` produces ./dist, then
+  // `npx wrangler deploy` uploads it. `name` must match the Cloudflare project.
+  // single-page-application => unmatched routes serve index.html (SPA refresh-safe).
+  "name": "prana-production-app",
+  "compatibility_date": "2025-06-01",
+  "assets": {
+    "directory": "./dist/",
+    "not_found_handling": "single-page-application"
+  }
+}
