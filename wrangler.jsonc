@@ -8,5 +8,10 @@
   "assets": {
     "directory": "./dist/",
     "not_found_handling": "single-page-application"
+  },
+  // Free Workers Logs — live request/error logs for the production app. Declaring
+  // it here silences the deploy warning about config drift.
+  "observability": {
+    "enabled": true
   }
 }
