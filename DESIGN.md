@@ -1,73 +1,75 @@
-# Design System: PRANA VENTURE — "Signal"
+# Design
 
-Premium, animated production console. Built so the **experience feels world-class**
-(cinematic motion, depth, a living 3D ambient layer) while the **work screens stay
-instantly legible** for shop-floor operators. Grounded in ISA-101 High-Performance
-HMI clarity + Stitch anti-generic taste.
+> Visual system for Prana Venture's production console. Direction: **Command Deck** — the data-driven best-of-all-621-Aura systems (Linear/Geist-grade), the standard `/polish` and `/audit` hold edits to.
+>
+> **Command Deck deltas (current — override the Tactical values below where they conflict):**
+> - **Canvas** `#07090C` near-black (lifted off pure black → no halation) · panels `#11141A` gunmetal.
+> - **Accent** electric cyan `#22D3EE` (primary fills/active) + `#5EE7FF` (bright thin marks/chart signal); violet `#8B5CF6` rare. Buttons = cyan fill + dark text `#04161a`.
+> - **Radius `8px` tier** (the proven 50%-of-621 norm — NOT sharp 2px): panels `[10px]`, controls/cards `rounded-lg` 8px, status pills 6px, meter micro 2px, pill 9999.
+> - **Nav = LEFT SIDEBAR** (240px desktop / 68px icon rail on tablet; active = cyan bg-tint + 2px accent bar + filled icon), replacing top-nav.
+> - **Type** IBM Plex Sans for ALL UI (clean headers, not mono) + JetBrains Mono for ALL numbers/data (tabular).
+> - Dashboard trends toward **active** (clickable problems → drill/act). Keeps: bespoke Recharts (cyan marks), edge-light depth, a11y, 3D login hero, `//01` panel tags, crosshair motifs.
 
-Atmosphere sliders → **Density 5** (data-rich but breathable) · **Variance 4**
-(structured, lightly asymmetric — clarity first) · **Motion 7** (fluid, choreographed,
-spring-physics — but never gratuitous on data).
+## Theme
 
-## 1. Visual Theme & Atmosphere
-A bright, architectural workspace with calm depth and a slow-moving ambient gradient
-field behind key surfaces. Surfaces are crisp near-white planes floating on a soft
-zinc canvas; one confident cobalt accent carries identity and intent; status (green /
-amber / red) is reserved strictly for "are we on track?" and always paired with a
-label + icon. The feeling: precise, alive, and expensive — a control room designed by
-a product studio, not a SCADA vendor.
+Real-time industrial command console on near-black. One cyan accent for signal, violet as a rare secondary, production status hues (green/amber/red) reserved strictly for "are we on track". Density is a feature: mono numbers, hairline dividers, sharp 2px corners. Depth comes from a 5-step luminance ladder + edge-light borders (white insets read on black; black drop shadows do not). Color strategy: **Restrained** (tinted-neutral surfaces + one accent ≤10% of surface).
 
-## 2. Color Palette & Roles
-- **Zinc Canvas** (#EEF0F4) — app background; carries the ambient gradient field
-- **Pure Surface** (#FFFFFF) — cards, panels, header
-- **Frost Surface** (#F6F8FB) — insets, tracks, secondary fills
-- **Off-Black Ink** (#11151C) — primary text (never pure #000)
-- **Steel Ink** (#586375) — secondary text, labels, metadata
-- **Mute Ink** (#8A93A3) — tertiary text, captions
-- **Hairline** (#E2E6EE) — 1px structural borders
-- **Signal Cobalt** (#2F54EB) — THE single accent: identity, primary CTA, active nav,
-  focus rings, the trend line (saturation kept measured, never neon)
-- **Cobalt Wash** (rgba(47,84,235,0.08)) — accent tints, active surfaces
-- **Status — On Track** (#15A349 / soft #E7F6EC / ink #15803D)
-- **Status — Behind** (#E8910A / soft #FCF1D6 / ink #B45309)
-- **Status — Critical** (#E0322F / soft #FCE7E7 / ink #B91C1C)
-> Max ONE accent. No purple/neon glows. Status hues never used for decoration.
+## Color palette
 
-## 3. Typography
-- **Display + Body:** `Geist` — track-tight headings, weight-driven hierarchy (Inter BANNED)
-- **Numerics + codes:** `Geist Mono` — all metric values, KPIs, machine codes, timestamps (tabular)
-- Headlines scale with `clamp()`; body min 14px; max ~65ch on prose.
+Surfaces (5-step elevation ladder, near-black → gunmetal; child always one step lighter than parent):
+- `base` canvas `#020203`
+- `coal` header band / wells `#07080B`
+- `panel` cards / KPI / charts `#0F1116`
+- `panelhi` hero top-edge luminance `#161922`
+- `inset` raised inside a card / inputs / tracks `#1B1F28`
+- `over` overlays (modal / dropdown) `#252936`
 
-## 4. Component Stylings
-- **Buttons:** flat cobalt fill (primary) / hairline ghost (secondary). Tactile press
-  (scale 0.98 + 1px down). No outer glow. Spring on hover lift.
-- **Cards/Panels:** generously rounded (1.25–1.5rem), hairline border + soft tinted
-  shadow. Subtle pointer-tracked tilt on hero cards only. Elevation = hierarchy.
-- **KPI tiles:** neutral; big mono number; status only in the delta line.
-- **Glance Status banner:** the hero — colored status rail + big mono ratio + status
-  pill, readable in 2s (Andon principle).
-- **Inputs:** label above, cobalt focus ring, error below. Big touch targets (≥56px).
-- **Loaders:** skeletal shimmer matching layout (no spinners).
-- **Empty states:** composed, instructive — never bare "No data".
+Ink (cool near-white ramp): `ink #F2F6F7` (≥15:1 on panel) · `ink-soft #A1A1AA` (~7:1) · `ink-dim #6B7682` (~4.6:1).
 
-## 5. Layout
-CSS-grid first, max-width 1152px centered, generous padding. Single-column collapse
-< 768px, zero horizontal overflow. Operator controls ≥60px touch targets, glove-safe
-spacing. Full-height via `min-h-[100dvh]`.
+Accent — **cyan** (primary signal; CTAs use DARK text on cyan, white-on-cyan fails AA):
+`brand-200 #C9F7FF · 300 #8DE9FB · 400 #5EE7FF · 500 #34D2EC · 600 #1FB6D0 · 700 #1892A6`. Used ONLY for: primary CTA, focus ring, current selection, nav underline, chart reference marks / now-dot. Never a per-row badge or per-card border.
 
-## 6. Motion & Interaction (the "experience")
-- **Engine:** Framer Motion. **Spring default** `stiffness 200, damping 26` (weighty, premium).
-- **Page transitions:** shared-layout, soft rise + fade between views.
-- **Staggered reveals:** panels/rows cascade in (≤60ms steps) — never instant. Numbers
-  count up ONCE on mount, isolated from layout animation (no re-render fights).
-- **Micro-interactions:** hover lift on cards, animated nav pill (layoutId), animated
-  progress + chart draw-in, tactile presses, a "live" pulse.
-- **3D ambient layer:** a low-cost `react-three-fiber` shader-gradient mesh behind the
-  login hero + dashboard masthead — slow, desaturated cobalt/teal flow. Lazy-loaded,
-  capped DPR, disabled on `prefers-reduced-motion` and small/low-power devices.
-- **Performance:** animate `transform`/`opacity` only. 3D isolated + suspended.
+Secondary — **violet** (rare): `#8B5CF6` (soft `rgba(139,92,246,0.14)`, ink `#B9A6FF`). One restrained role (realtime indicator / a single secondary series).
 
-## 7. Anti-Patterns (banned)
-No emojis · no Inter · no pure black · no neon/purple glows · no oversaturated accents ·
-no 3 equal feature cards · no AI clichés ("Elevate/Seamless/Next-Gen") · no spinners ·
-no decorative use of status color · no motion that delays reading a number.
+Neutral magnitude — **steel** `#5C6573` / `#828C9C` (on-plan bars; not the accent).
+
+Status (production state ONLY, with a word + position, never color alone):
+`ok #3FB969 / ink #76D89A` · `warn #E0A53C / ink #F0C36A` · `bad #F1564C / ink #FF8B83`.
+
+Hairlines: `hair rgba(120,180,200,0.08)` · `hair-strong rgba(94,231,255,0.16)` (active/input). Focus ring: cyan `#5EE7FF`, 2px, 2px offset.
+
+## Typography
+
+Fixed rem scale (product UI, not fluid). Families (≤3, contrast axis):
+- **Display / titles**: JetBrains Mono (techy headers — the ops-console signature).
+- **Body prose / labels**: IBM Plex Sans (kept for readability of longer text).
+- **Numbers / eyebrows / codes**: JetBrains Mono, always `tabular-nums`.
+
+Scale (px): 11 (eyebrow/cap, min) · 13 (label/body-sm) · 15/16 (body) · 19 (entry qty) · 28 (shift cell) · 32 (KPI) · 40 (today actual) · hero clamp max ≤ 56px. Weight contrast ≥ 1.25 between steps; display letter-spacing ≥ -0.03em. No all-caps body; uppercase only for ≤4-word labels.
+
+## Components
+
+Every interactive component ships: default / hover / focus / active / disabled / loading / error.
+- **Buttons** — primary = solid cyan + dark text (`#04161A`), hover deepens to `brand-600`; secondary = inset + hairline ring, cyan only on hover. ≥44px.
+- **Cards / panels** — `bg-panel` + edge-light shadow (inset top hairline + perimeter ring + soft ambient). Sharp 2px corners. No nested cards.
+- **Meter** — squared track + hairline tick dividers (engineering gauge), 2px radius; status-coloured or steel.
+- **Status pill** — soft-tint bg + ink text + word; no trend arrows.
+- **Panel index tag** — mono `//01`-style chip in a hairline box (deliberate ops-console sequence, not decorative numbering).
+- **Inputs** — `bg-inset` + `hair-strong` border, cyan focus border; numeric steppers ≥44px; date picker dark.
+- **Empty / loading / error** — composed empty states (crosshair marks + "NO DATA" + guidance), skeleton-not-spinner where content loads, inline error below field + surfaced save errors.
+
+## Layout
+
+8pt grid. Section rhythm 20px; card padding 20px (lead 24px). Max content width `max-w-6xl`. Responsive is structural (12-col asymmetric dashboard grid → single column < 768px; nav collapses to a tap-dense row on mobile; tables scroll-x with a min-width). Three radius tiers, all sharp: outer 2–3px (panels/modal) · control 2px (inputs/buttons/chips) · micro 2px (meter); pill 9999px reserved for the live dot only.
+
+## Motion
+
+150–250ms, conveys state not decoration (feedback, reveal, count-up, nav underline, dialog from trigger). Ease-out exponential; no bounce. Staggered list entrances are fine; no orchestrated full-page load sequence beyond the login→app threshold. Reduced-motion → instant/crossfade everywhere (MotionConfig reducedMotion="user" + CSS belt). Realtime = a single cyan border-beam on the live panel only.
+
+## Accessibility
+
+WCAG AA floor (AAA on primary numbers). Verified contrast on cyan (dark text). Status word + position, never hue alone. Reduced-motion, ≥44px targets, focus-trapped dialog (Esc + restore), tabular figures, keyboard order = visual order.
+
+## Bans (this project)
+
+No side-stripe colored borders >1px as decoration (use full hairline or a status bar). No gradient-clipped text. No glassmorphism-by-default. No icon-in-a-tinted-box on headings/nav/KPIs. No glow-soup — cyan/violet stay as precise signal. No fluid display headings in app chrome.

@@ -15,8 +15,8 @@ import { useRef, useMemo, useEffect, useState, Suspense } from "react";
 import * as THREE from "three";
 
 // Status tints the single EDGE accent — the metal itself stays steel.
-const ACCENT = { ok: "#2F4BFF", warn: "#E0A53C", bad: "#F1564C" };
-const FOG = "#161b27";
+const ACCENT = { ok: "#5EE7FF", warn: "#E0A53C", bad: "#F1564C" };
+const FOG = "#06080c";
 
 // A turned spindle profile (radius, height) revolved around Y — grooves + flange
 // catch the soft env reflections as it rotates, reading as a real machined part.
@@ -154,7 +154,7 @@ export default function Ambient({ status = "ok", variant = "ambient" }) {
         <Environment frames={1} resolution={256}>
           <Lightformer intensity={1.5} color="#eef1f7" position={[3, 3, 3]} scale={[7, 7, 1]} />
           <Lightformer intensity={0.9} color="#c6cede" position={[-4, 1, -3]} scale={[6, 6, 1]} />
-          <Lightformer intensity={0.6} color="#2F4BFF" position={[-2, -2, 2]} scale={[6, 2, 1]} />
+          <Lightformer intensity={0.6} color="#5EE7FF" position={[-2, -2, 2]} scale={[6, 2, 1]} />
         </Environment>
 
         {/* in-scene extruded wordmark — matte metal, catches the same studio light
@@ -178,7 +178,7 @@ export default function Ambient({ status = "ok", variant = "ambient" }) {
           <Float speed={1.4} rotationIntensity={0.6} floatIntensity={0.5}>
             <mesh position={[2.05, -0.5, 0.7]}>
               <icosahedronGeometry args={[0.38, 0]} />
-              <meshPhysicalMaterial transmission={1} thickness={0.5} roughness={0.12} ior={1.45} metalness={0} color="#dfe6ff" attenuationColor="#2F4BFF" attenuationDistance={1.2} clearcoat={0.3} clearcoatRoughness={0.2} />
+              <meshPhysicalMaterial transmission={1} thickness={0.5} roughness={0.12} ior={1.45} metalness={0} color="#d6f7ff" attenuationColor="#5EE7FF" attenuationDistance={1.2} clearcoat={0.3} clearcoatRoughness={0.2} />
             </mesh>
           </Float>
         )}

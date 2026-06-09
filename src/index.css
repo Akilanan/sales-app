@@ -28,14 +28,14 @@ body {
   margin: 0;
   /* surface-0 canvas: a faint top-down cool light (gives the page a light
      direction so it never reads flat) over a barely-there engineering grid */
-  background-color: #090b10;
+  background-color: #07090c;
   background-image:
-    radial-gradient(120% 70% at 50% -12%, rgba(42, 56, 92, 0.12), transparent 58%),
-    linear-gradient(rgba(150, 165, 200, 0.016) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(150, 165, 200, 0.016) 1px, transparent 1px);
+    radial-gradient(120% 70% at 50% -12%, rgba(34, 211, 238, 0.06), transparent 58%),
+    linear-gradient(rgba(120, 180, 200, 0.016) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 180, 200, 0.016) 1px, transparent 1px);
   background-size: 100% 100%, 48px 48px, 48px 48px;
   background-attachment: fixed, scroll, scroll;
-  color: #eceff4;
+  color: #f2f6f7;
   font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -51,9 +51,9 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(38% 38% at 18% 16%, rgba(47, 75, 255, 0.18), transparent 60%),
-    radial-gradient(40% 40% at 85% 4%, rgba(20, 56, 96, 0.15), transparent 62%),
-    radial-gradient(44% 44% at 62% 90%, rgba(42, 28, 96, 0.12), transparent 64%);
+    radial-gradient(38% 38% at 18% 16%, rgba(34, 211, 238, 0.16), transparent 60%),
+    radial-gradient(40% 40% at 85% 4%, rgba(20, 90, 110, 0.14), transparent 62%),
+    radial-gradient(44% 44% at 62% 90%, rgba(139, 92, 246, 0.12), transparent 64%);
   filter: blur(10px);
   animation: aura 36s ease-in-out infinite;
   will-change: transform;
@@ -82,22 +82,22 @@ body::after {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(154, 166, 255, 0.16);
+  background: rgba(94, 231, 255, 0.18);
   border-radius: 6px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(154, 166, 255, 0.28);
+  background: rgba(94, 231, 255, 0.30);
   background-clip: content-box;
 }
 ::selection {
-  background: rgba(47, 75, 255, 0.4);
-  color: #eceff4;
+  background: rgba(94, 231, 255, 0.3);
+  color: #f2f6f7;
 }
 /* crisp machined edge, not a soft glow halo */
 *:focus-visible {
-  outline: 2px solid #2f4bff;
+  outline: 2px solid #5ee7ff;
   outline-offset: 2px;
 }
 /* hide the native cursor only when the bespoke Cursor component is active
@@ -134,7 +134,7 @@ input[type="number"]::-webkit-outer-spin-button {
     border-radius: inherit;
     background: radial-gradient(
       420px circle at var(--mx, -40%) var(--my, -40%),
-      rgba(47, 75, 255, 0.13),
+      rgba(94, 231, 255, 0.13),
       transparent 45%
     );
     opacity: 0;
@@ -164,8 +164,8 @@ input[type="number"]::-webkit-outer-spin-button {
   background: conic-gradient(
     from var(--beam-a),
     transparent 0 70%,
-    #2f4bff 84%,
-    #6273ff 90%,
+    #5ee7ff 84%,
+    #8b5cf6 90%,
     transparent 96%
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);

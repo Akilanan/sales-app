@@ -4,33 +4,43 @@ export default {
   theme: {
     extend: {
       fontFamily: {
+        // Command Deck: ONE clean premium sans carries display + body + labels
+        // (Impeccable product register: one family is often right); JetBrains Mono
+        // for ALL numbers/data/codes = engineering-grade tabular figures.
         sans: ["'IBM Plex Sans'", "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ["'IBM Plex Mono'", "ui-monospace", "monospace"],
-        display: ["Archivo", "'IBM Plex Sans'", "sans-serif"],
+        mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
+        display: ["'IBM Plex Sans'", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       colors: {
-        // "Cold Steel + Electric Signal" — arctic graphite near-black, cool
-        // off-white ink, ONE solid electric-blue accent (no neon, no glow).
-        // Drawn from igloo (steel monochrome + atmosphere) + lusion (Klein-blue
-        // + matte 3D + crosshair precision). Status = production state ONLY.
-        // 5-step luminance elevation ladder (cool ~228 hue) — each child sits one
-        // step lighter than its parent so nesting reads as real planes, not flat DOM.
-        base: "#090B10", // surface-0 canvas (dropped darker so panels sit ABOVE it)
-        coal: "#0E1117", // surface-1 header band / deep section wells
-        panel: "#14171D", // surface-2 cards / KPI / chart panels / glance
-        panelhi: "#181C24", // top-edge luminance for hero surfaces (gradient TO panel)
-        inset: "#1A1E26", // surface-3 raised: tracks/inputs/keycaps INSIDE a card, hover
-        over: "#222838", // surface-4 overlays: modal / dropdown / confirm
-        hair: "rgba(220,228,242,0.07)",
-        "hair-strong": "rgba(220,228,242,0.13)", // input outline / active ring / 2nd border weight
-        ink: { DEFAULT: "#ECEFF4", soft: "#A2ABBC", dim: "#8A93A4" },
-        // brand = electric / Klein blue (solid fills only — never a glow)
-        brand: { 200: "#C8CFFF", 300: "#9AA6FF", 400: "#6273FF", 500: "#2F4BFF", 600: "#1E36E6", 700: "#152AA6" },
+        // "Tactical Ops-Console" — near-black canvas, gunmetal surfaces, ONE cyan
+        // signal accent + a restrained violet secondary (adopted from Aura's Tactical
+        // Intelligence Platform). Status = production state ONLY (green/amber/red).
+        // 5-step luminance elevation ladder (near-black → gunmetal) — each child sits
+        // one step lighter than its parent so nesting reads as real planes, not flat DOM.
+        base: "#07090C", // surface-0 canvas (near-black, lifted off pure #000 → no halation)
+        coal: "#0B0E12", // surface-1 sidebar / header band / deep wells
+        panel: "#11141A", // surface-2 cards / KPI / chart panels / glance
+        panelhi: "#171B22", // top-edge luminance for hero surfaces (gradient TO panel)
+        inset: "#1A1F27", // surface-3 raised: tracks/inputs/keycaps INSIDE a card, hover
+        over: "#222834", // surface-4 overlays: modal / dropdown / confirm
+        hair: "rgba(120,180,200,0.08)", // cool/cyan-tinted hairline
+        "hair-strong": "rgba(34,211,238,0.16)", // input outline / active ring (cyan)
+        ink: { DEFAULT: "#F2F6F7", soft: "#A1A1AA", dim: "#6B7682" },
+        // brand = CYAN signal (proven cyan scale; buttons use DARK text on cyan — white-on-cyan fails AA)
+        brand: { 200: "#A5F3FC", 300: "#67E8F9", 400: "#5EE7FF", 500: "#22D3EE", 600: "#06B6D4", 700: "#0E7490" },
+        // restrained secondary accent (one rare role: realtime / a single 2nd series)
+        viol: { DEFAULT: "#8B5CF6", soft: "rgba(139,92,246,0.14)", ink: "#B9A6FF" },
         steel: { DEFAULT: "#5C6573", soft: "#828C9C" },
-        // status — cool-tuned, reserved strictly for "are we on track?"
+        // status — reserved strictly for "are we on track?"
         ok: { DEFAULT: "#3FB969", soft: "rgba(63,185,105,0.13)", ink: "#76D89A" },
         warn: { DEFAULT: "#E0A53C", soft: "rgba(224,165,60,0.13)", ink: "#F0C36A" },
         bad: { DEFAULT: "#F1564C", soft: "rgba(241,86,76,0.13)", ink: "#FF8B83" },
+      },
+      // Command Deck radius: 8px is the proven library norm (50% of 621). Tiered so the
+      // whole app updates via the scale; arbitrary panel radii handled in App.jsx.
+      borderRadius: {
+        none: "0", sm: "4px", DEFAULT: "6px", md: "6px", lg: "8px",
+        xl: "10px", "2xl": "12px", "3xl": "16px", full: "9999px",
       },
       boxShadow: {
         // Linear-style LAYERED edge-light (the depth cue that reads on near-black):
@@ -44,13 +54,13 @@ export default {
         hero: "inset 0 1px 0 0 rgba(255,255,255,0.10), inset 0 0 0 1px rgba(255,255,255,0.045), 0 18px 46px -18px rgba(0,0,0,0.74)",
         raise: "inset 0 1px 0 0 rgba(255,255,255,0.08), inset 0 0 0 1px rgba(255,255,255,0.04), 0 22px 55px -20px rgba(0,0,0,0.8)",
         pop: "inset 0 1px 0 0 rgba(255,255,255,0.09), inset 0 0 0 1px rgba(255,255,255,0.05), 0 48px 95px -26px rgba(0,0,0,0.85)",
-        ring: "0 0 0 1px rgba(47,75,255,0.45)",
+        ring: "0 0 0 1px rgba(94,231,255,0.5)",
       },
       keyframes: {
         "pulse-dot": {
-          "0%": { boxShadow: "0 0 0 0 rgba(47,75,255,0.45)" },
-          "70%": { boxShadow: "0 0 0 5px rgba(47,75,255,0)" },
-          "100%": { boxShadow: "0 0 0 0 rgba(47,75,255,0)" },
+          "0%": { boxShadow: "0 0 0 0 rgba(94,231,255,0.5)" },
+          "70%": { boxShadow: "0 0 0 5px rgba(94,231,255,0)" },
+          "100%": { boxShadow: "0 0 0 0 rgba(94,231,255,0)" },
         },
       },
       animation: {

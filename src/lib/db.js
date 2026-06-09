@@ -17,7 +17,20 @@ export const MODE = configured ? "supabase" : "local";
 export const db = configured ? supabaseImpl.db : localImpl.db;
 export const seedIfEmpty = configured ? supabaseImpl.seedIfEmpty : localImpl.seedIfEmpty;
 
+// PROD SAFETY: a production build with no Supabase config must NOT silently serve
+// the in-browser demo data layer to real users. When this is true the app refuses
+// to mount (see App.jsx) and shows a hard configuration error instead of demo data.
+// Dev (`npm run dev`) is unaffected (import.meta.env.PROD is false), so the local
+// demo still works for development; only the shipped production bundle enforces this.
+export const CONFIG_ERROR = Boolean(import.meta.env.PROD && !configured);
+
 if (typeof window !== "undefined") {
-  // Handy hint in the browser console which backend is live.
-  console.info(`[PRANA] data layer: ${MODE}${configured ? "" : " (demo — set VITE_SUPABASE_* to go live)"}`);
+  if (CONFIG_ERROR) {
+    console.error(
+      "[PRANA] Production build is missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY — " +
+      "refusing to run in demo mode. Set both env vars and rebuild."
+    );
+  } else {
+    console.info(`[PRANA] data layer: ${MODE}${configured ? "" : " (demo — set VITE_SUPABASE_* to go live)"}`);
+  }
 }

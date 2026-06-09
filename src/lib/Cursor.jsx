@@ -52,8 +52,8 @@ export default function Cursor() {
       if (ring.current) {
         const scale = (hovering.current ? 1.7 : 1) * (down.current ? 0.78 : 1);
         ring.current.style.transform = `translate3d(${ringPos.current.x}px, ${ringPos.current.y}px, 0) translate(-50%, -50%) scale(${scale})`;
-        ring.current.style.borderColor = hovering.current ? "rgba(47,75,255,0.9)" : "rgba(236,239,244,0.38)";
-        ring.current.style.background = hovering.current ? "rgba(47,75,255,0.10)" : "transparent";
+        ring.current.style.borderColor = hovering.current ? "rgba(94,231,255,0.9)" : "rgba(236,239,244,0.38)";
+        ring.current.style.background = hovering.current ? "rgba(94,231,255,0.10)" : "transparent";
       }
       raf = requestAnimationFrame(loop);
     };
@@ -79,7 +79,7 @@ export default function Cursor() {
         transition: "border-color 0.2s ease, background 0.2s ease, opacity 0.25s ease",
       }} />
       <div ref={dot} aria-hidden="true" style={{
-        ...base, width: 5, height: 5, borderRadius: 9999, background: "#2F4BFF",
+        ...base, width: 5, height: 5, borderRadius: 9999, background: "#5EE7FF",
         transition: "opacity 0.25s ease",
       }} />
     </>

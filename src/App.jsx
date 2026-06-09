@@ -10,7 +10,7 @@ import {
   TrendUp as TrendingUp, TrendDown as TrendingDown, Clock, ArrowRight,
   Warning as AlertTriangle, ShieldCheck, Backspace as Delete, Minus,
 } from "@phosphor-icons/react";
-import { db, seedIfEmpty, MODE } from "./lib/db";
+import { db, seedIfEmpty, MODE, CONFIG_ERROR } from "./lib/db";
 
 /* ============================================================================
    PRANA VENTURE — "COLD STEEL" UI · arctic graphite, ONE solid electric-blue
@@ -52,8 +52,8 @@ class SceneBoundary extends React.Component {
 // Cool, single-source static fallback — never the blotchy multi-radial blob.
 function StaticGlow({ variant = "ambient" }) {
   const bg = variant === "hero"
-    ? "radial-gradient(58% 52% at 66% 32%, rgba(47,75,255,0.14), transparent 70%), radial-gradient(48% 44% at 14% 98%, rgba(120,138,180,0.06), transparent 72%)"
-    : "radial-gradient(46% 42% at 84% 18%, rgba(47,75,255,0.08), transparent 72%)";
+    ? "radial-gradient(58% 52% at 66% 32%, rgba(94,231,255,0.14), transparent 70%), radial-gradient(48% 44% at 14% 98%, rgba(120,138,180,0.06), transparent 72%)"
+    : "radial-gradient(46% 42% at 84% 18%, rgba(94,231,255,0.08), transparent 72%)";
   return <div className={`${variant === "hero" ? "absolute" : "fixed"} inset-0 pointer-events-none`} style={{ zIndex: 0, background: bg }} aria-hidden="true" />;
 }
 
@@ -100,13 +100,13 @@ const STATUS = {
 };
 const levelForPct = (p) => (p >= 100 ? "ok" : p >= 80 ? "warn" : "bad");
 const levelForPace = (pace) => (pace >= 0.97 ? "ok" : pace >= 0.85 ? "warn" : "bad");
-const HEX = { brand: "#2F4BFF", grid: "rgba(220,228,242,0.07)", ghost: "rgba(220,228,242,0.12)", axis: "#8A93A4", axis2: "#A2ABBC" };
+const HEX = { brand: "#5EE7FF", grid: "rgba(120,180,200,0.08)", ghost: "rgba(120,180,200,0.14)", axis: "#6B7682", axis2: "#A1A1AA" };
 // Bespoke chart tooltip — a matte spec-card with a brand left-rule echoing the
 // dashboard status rail. No drop shadow (the system is flat, not floating-glass).
 function ChartTip({ active, payload, label, unit = "units" }) {
   if (!active || !payload || !payload.length) return null;
   return (
-    <div className="bg-coal border border-hair border-l-2 border-l-brand-500 rounded-r-md px-3 py-2.5">
+    <div className="bg-coal border border-hair rounded-[8px] px-3 py-2.5">
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-dim mb-1.5">{label}</div>
       <div className="space-y-1">
         {payload.map((p, i) => (
@@ -232,7 +232,7 @@ function SplitReveal({ lines, className = "" }) {
 function StatusPill({ level, label, size = "md" }) {
   const s = STATUS[level];
   const p = size === "lg" ? "px-3 py-1.5 text-sm" : "px-2.5 py-1 text-[12px]";
-  return <span className={`inline-flex items-center rounded-[5px] font-semibold ${p} ${s.soft} ${s.text}`}>{label || s.label}</span>;
+  return <span className={`inline-flex items-center rounded-[6px] font-semibold ${p} ${s.soft} ${s.text}`}>{label || s.label}</span>;
 }
 
 // Signed variance vs target — the magnitude behind the status word (±units · ±%).
@@ -240,7 +240,7 @@ function VarianceChip({ delta, pct, level }) {
   const s = STATUS[level];
   const d = Math.round(delta);
   return (
-    <span className={`inline-flex items-center font-mono text-[12px] font-semibold rounded-[5px] px-2 py-0.5 tnum ${s.soft} ${s.text}`}>
+    <span className={`inline-flex items-center font-mono text-[12px] font-semibold rounded-[6px] px-2 py-0.5 tnum ${s.soft} ${s.text}`}>
       {d > 0 ? "+" : d < 0 ? "−" : ""}{Math.abs(d).toLocaleString()} · {pct > 0 ? "+" : pct < 0 ? "−" : ""}{Math.abs(pct)}%
     </span>
   );
@@ -296,7 +296,7 @@ function PulseDot({ cx, cy, index, dataLen }) {
           <animate attributeName="stroke-opacity" values="0.55;0" dur="1.9s" repeatCount="indefinite" />
         </circle>
       )}
-      <circle cx={cx} cy={cy} r="3.5" fill={HEX.brand} stroke="#0B0D12" strokeWidth="2" />
+      <circle cx={cx} cy={cy} r="3.5" fill={HEX.brand} stroke="#020203" strokeWidth="2" />
     </g>
   );
 }
@@ -308,7 +308,7 @@ function CompTip({ active, payload }) {
   const d = payload[0].payload;
   const cl = levelForPct(d.pct);
   return (
-    <div className="bg-coal border border-hair border-l-2 border-l-brand-500 rounded-r-md px-3 py-2.5 min-w-[156px]">
+    <div className="bg-coal border border-hair rounded-[8px] px-3 py-2.5 min-w-[156px]">
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-dim mb-1.5">{d.name}</div>
       <div className="flex items-center justify-between gap-5 text-xs"><span className="text-ink-soft">Actual</span><span className="font-mono font-bold text-ink tnum">{d.actual.toLocaleString()}</span></div>
       <div className="flex items-center justify-between gap-5 text-xs mt-0.5"><span className="text-ink-soft">Expected</span><span className="font-mono text-ink-soft tnum">{d.expected.toLocaleString()}</span></div>
@@ -322,6 +322,25 @@ function CompTip({ active, payload }) {
 }
 
 /* ============================================================================ */
+// PROD SAFETY screen — shown when a production build has no Supabase config, so the
+// app never silently serves demo data to real users.
+function ConfigError() {
+  return (
+    <div className="min-h-[100dvh] grid place-items-center px-6 relative overflow-hidden">
+      <StaticGlow />
+      <div className="relative z-10 w-full max-w-md text-center">
+        <div className="font-display font-extrabold text-[26px] tracking-tight leading-none mb-1">PRANA <span className="text-ink-dim font-bold">VENTURE</span></div>
+        <div className="inline-flex items-center gap-2 mt-5 mb-3 px-3 py-1.5 rounded-lg bg-bad-soft border border-bad/25 text-bad-ink font-mono text-[11px] uppercase tracking-[0.18em]"><AlertTriangle size={14} /> Configuration required</div>
+        <h1 className="font-display font-bold text-xl text-ink mb-3">This build is not connected to a database</h1>
+        <p className="text-ink-soft text-sm leading-relaxed">
+          A production build will not run in demo mode. Set <code className="font-mono text-ink">VITE_SUPABASE_URL</code> and <code className="font-mono text-ink">VITE_SUPABASE_ANON_KEY</code> in the deploy environment, then rebuild.
+        </p>
+        <p className="text-ink-dim text-[12px] mt-5 font-mono">For a local demo, run <span className="text-ink-soft">npm run dev</span>.</p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
@@ -338,7 +357,7 @@ export default function App() {
     return pace >= 0.97 ? "ok" : pace >= 0.85 ? "warn" : "bad";
   }, [data]);
 
-  useEffect(() => { (async () => { await seedIfEmpty(); setBooting(false); })(); }, []);
+  useEffect(() => { (async () => { if (CONFIG_ERROR) { setBooting(false); return; } await seedIfEmpty(); setBooting(false); })(); }, []);
 
   const loadData = useCallback(async () => {
     const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
@@ -361,6 +380,10 @@ export default function App() {
     );
     return () => { clearTimeout(t); setLive(false); unsub(); };
   }, [user, loadData]);
+
+  // PROD SAFETY: never silently serve demo data in a production build that has no
+  // Supabase config. Refuse to mount; show a hard, unmistakable configuration error.
+  if (CONFIG_ERROR) return <ConfigError />;
 
   if (booting)
     return (
@@ -386,16 +409,18 @@ export default function App() {
         </m.div>
       ) : (
         <m.div key="app" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="min-h-[100dvh] text-ink relative">
-          <Header user={user} view={view} setView={setView} logout={logout} status={appStatus} live={live} />
-          <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-7 sm:py-9">
-            <AnimatePresence mode="wait">
-              <m.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
-                {view === "dashboard" && <Dashboard data={data} live={live} />}
-                {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
-                {view === "plan" && <PlanSetup data={data} reload={loadData} />}
-              </m.div>
-            </AnimatePresence>
-          </main>
+          <Sidebar user={user} view={view} setView={setView} logout={logout} status={appStatus} live={live} />
+          <div className="pl-[68px] lg:pl-[240px] transition-[padding] duration-200">
+            <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
+              <AnimatePresence mode="wait">
+                <m.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
+                  {view === "dashboard" && <Dashboard data={data} live={live} setView={setView} />}
+                  {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
+                  {view === "plan" && <PlanSetup data={data} reload={loadData} />}
+                </m.div>
+              </AnimatePresence>
+            </main>
+          </div>
         </m.div>
       )}
     </AnimatePresence>
@@ -425,18 +450,31 @@ function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
+  const [pending, setPending] = useState(false); // async auth in flight → block double-submit
 
-  const press = (d) => { setErr(""); setPin((p) => (p.length < 6 ? p + d : p)); };
-  const back = () => setPin((p) => p.slice(0, -1));
-  const pinLogin = async () => { const u = await db.loginByPin(pin); u ? onLogin(u) : (setErr("Invalid PIN. Try 1001, 1002 or 1003."), setPin("")); };
-  const credLogin = async () => { const u = await db.loginByCredentials(username, password); u ? onLogin(u) : setErr("Wrong username or password."); };
+  const press = (d) => { if (pending) return; setErr(""); setPin((p) => (p.length < 6 ? p + d : p)); };
+  const back = () => { if (!pending) setPin((p) => p.slice(0, -1)); };
+  const pinLogin = async () => {
+    if (pending || pin.length === 0) return;
+    setPending(true);
+    try { const u = await db.loginByPin(pin); if (u) { onLogin(u); } else { setErr("Invalid PIN. Try 1001, 1002 or 1003."); setPin(""); } }
+    catch { setErr("Sign-in failed. Please try again."); }
+    finally { setPending(false); }
+  };
+  const credLogin = async () => {
+    if (pending) return;
+    setPending(true);
+    try { const u = await db.loginByCredentials(username, password); if (u) { onLogin(u); } else { setErr("Wrong username or password."); } }
+    catch { setErr("Sign-in failed. Please try again."); }
+    finally { setPending(false); }
+  };
 
   // Solid keys — flat fills, hairline borders, tactile press. No glass, no glow.
-  const Key = ({ children, onClick, variant, label }) => (
-    <m.button onClick={onClick} aria-label={label}
-      whileTap={{ scale: 0.95 }} transition={{ type: "spring", stiffness: 400, damping: 25, mass: 0.6 }}
-      className={`h-16 rounded-xl grid place-items-center text-2xl font-semibold transition-colors ${
-        variant === "go" ? "bg-brand-500 text-white hover:bg-brand-600 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)]"
+  const Key = ({ children, onClick, variant, label, disabled }) => (
+    <m.button onClick={onClick} disabled={disabled} aria-label={label}
+      whileTap={disabled ? undefined : { scale: 0.95 }} transition={{ type: "spring", stiffness: 400, damping: 25, mass: 0.6 }}
+      className={`h-16 rounded-xl grid place-items-center text-2xl font-semibold transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+        variant === "go" ? "bg-brand-500 text-[#04161a] hover:bg-brand-600 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)]"
         : variant === "back" ? "bg-inset border border-hair text-ink-soft hover:text-ink hover:border-white/15"
         : "bg-inset border border-hair text-ink font-mono hover:border-brand-500/55 hover:bg-white/[0.04]"}`}>{children}</m.button>
   );
@@ -452,14 +490,14 @@ function LoginScreen({ onLogin }) {
         {/* scrim: darken lower-left for legible copy, leave the upper-right object clear */}
         <div className="absolute inset-0 z-[1] pointer-events-none" style={{ background: "radial-gradient(82% 82% at 0% 100%, rgba(11,13,18,0.92) 0%, rgba(11,13,18,0.28) 46%, rgba(11,13,18,0) 66%), linear-gradient(90deg, rgba(11,13,18,0.6) 0%, rgba(11,13,18,0) 42%)" }} />
         {/* cinematic CSS grade — soft blue bloom behind the part + edge vignette (zero WebGL cost) */}
-        <div className="absolute inset-0 z-[2] pointer-events-none" style={{ background: "radial-gradient(44% 42% at 68% 36%, rgba(47,75,255,0.11), transparent 68%), radial-gradient(125% 120% at 52% 42%, transparent 58%, rgba(4,6,11,0.6) 100%)" }} />
+        <div className="absolute inset-0 z-[2] pointer-events-none" style={{ background: "radial-gradient(44% 42% at 68% 36%, rgba(94,231,255,0.11), transparent 68%), radial-gradient(125% 120% at 52% 42%, transparent 58%, rgba(4,6,11,0.6) 100%)" }} />
         {/* crosshair registration marks */}
         <Crosshair className="absolute z-[2] top-10 right-10" />
         <Crosshair className="absolute z-[2] top-10 left-12" />
         <Crosshair className="absolute z-[2] bottom-10 right-1/3" />
 
         <div className="relative z-10 max-w-md pb-1">
-          <h1 className="font-display text-[clamp(2.9rem,4.4vw,4.1rem)] font-extrabold leading-[0.98] tracking-[-0.025em]" aria-label="Built on the shop floor.">
+          <h1 className="font-display text-[clamp(2.4rem,4.2vw,3.6rem)] font-extrabold leading-[1.0] tracking-[-0.03em]" aria-label="Built on the shop floor.">
             <SplitReveal lines={["Built on the", "shop floor."]} />
           </h1>
           <p className="mt-6 text-ink-soft text-[15px] leading-relaxed max-w-sm">
@@ -472,8 +510,8 @@ function LoginScreen({ onLogin }) {
       {/* RIGHT — solid form panel (subtle top-down depth to match the cards) */}
       <section className="relative flex items-center justify-center px-6 py-10 sm:px-10 bg-gradient-to-b from-[#121620] to-coal min-h-[100dvh]">
         <m.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} className="w-full max-w-[360px]">
-          {/* brand lockup — the shared-layout source that flies into the header on sign-in */}
-          <m.div layoutId="prana-mark" className="mb-8">
+          {/* brand lockup */}
+          <m.div className="mb-8">
             <Wordmark />
           </m.div>
 
@@ -488,15 +526,15 @@ function LoginScreen({ onLogin }) {
             <m.div className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-lg bg-brand-500"
               animate={{ x: mode === "operator" ? 0 : "100%" }} transition={{ type: "spring", stiffness: 380, damping: 32 }} />
             {modes.map(([id, label]) => (
-              <button key={id} onClick={() => { setMode(id); setErr(""); }} aria-pressed={mode === id} className={`relative z-10 min-h-[44px] py-3 rounded-lg text-sm font-semibold transition-colors ${mode === id ? "text-white" : "text-ink-soft hover:text-ink"}`}>{label}</button>
+              <button key={id} onClick={() => { setMode(id); setErr(""); }} aria-pressed={mode === id} className={`relative z-10 min-h-[44px] py-3 rounded-lg text-sm font-semibold transition-colors ${mode === id ? "text-[#04161a]" : "text-ink-soft hover:text-ink"}`}>{label}</button>
             ))}
           </div>
 
           <AnimatePresence mode="wait">
             {mode === "operator" ? (
               <m.div key="op" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={{ duration: 0.22 }}>
-                <label className={labelCls}>PIN</label>
-                <div className="h-14 mb-4 rounded-xl bg-inset border border-hair flex items-center justify-center gap-3">
+                <div className={labelCls}>PIN</div>
+                <div role="status" aria-live="polite" aria-label={pin.length ? `${pin.length} digit${pin.length === 1 ? "" : "s"} entered` : "PIN empty"} className="h-14 mb-4 rounded-xl bg-inset border border-hair flex items-center justify-center gap-3">
                   {pin.length === 0 ? <span className="font-mono text-ink-dim text-[11px] uppercase tracking-[0.28em]">Enter PIN</span> :
                     pin.split("").map((_, i) => <m.span key={i} initial={{ scale: 0.2, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 500, damping: 28 }} className="w-3 h-3 rounded-full bg-brand-400" />)}
                 </div>
@@ -504,26 +542,28 @@ function LoginScreen({ onLogin }) {
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => <Key key={n} onClick={() => press(String(n))}>{n}</Key>)}
                   <Key onClick={back} variant="back" label="Delete last digit"><Delete size={22} /></Key>
                   <Key onClick={() => press("0")}>0</Key>
-                  <Key onClick={pinLogin} variant="go" label="Enter PIN"><ArrowRight size={24} /></Key>
+                  <Key onClick={pinLogin} variant="go" label="Enter PIN" disabled={pending || pin.length === 0}><ArrowRight size={24} /></Key>
                 </div>
               </m.div>
             ) : (
-              <m.div key="mgr" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={{ duration: 0.22 }} className="space-y-4">
-                <div>
-                  <label className={labelCls}>Username</label>
-                  <input value={username} onChange={(e) => { setUsername(e.target.value); setErr(""); }} placeholder="anita / admin" className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Password</label>
-                  <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setErr(""); }} onKeyDown={(e) => e.key === "Enter" && credLogin()} placeholder="••••••••" className={inputCls} />
-                </div>
-                <Magnetic className="w-full"><button onClick={credLogin} className="group w-full py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)]">Log in <ArrowRight size={18} className="transition-transform duration-300 ease-[cubic-bezier(.34,1.56,.64,1)] group-hover:translate-x-1" /></button></Magnetic>
+              <m.div key="mgr" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={{ duration: 0.22 }}>
+                <form onSubmit={(e) => { e.preventDefault(); credLogin(); }} className="space-y-4">
+                  <div>
+                    <label htmlFor="login-username" className={labelCls}>Username</label>
+                    <input id="login-username" name="username" autoComplete="username" value={username} onChange={(e) => { setUsername(e.target.value); setErr(""); }} placeholder="anita / admin" className={inputCls} />
+                  </div>
+                  <div>
+                    <label htmlFor="login-password" className={labelCls}>Password</label>
+                    <input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setErr(""); }} placeholder="••••••••" className={inputCls} />
+                  </div>
+                  <Magnetic className="w-full"><button type="submit" disabled={pending} className="group w-full py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-[#04161a] font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{pending ? "Signing in…" : <>Log in <ArrowRight size={18} className="transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" /></>}</button></Magnetic>
+                </form>
               </m.div>
             )}
           </AnimatePresence>
 
           <AnimatePresence>
-            {err && <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div className={`${errCls} mt-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></m.div>}
+            {err && <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div role="alert" className={`${errCls} mt-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></m.div>}
           </AnimatePresence>
 
           {MODE === "local" && (
@@ -537,51 +577,53 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-/* ------------------------------ Header ------------------------------------ */
-function Header({ user, view, setView, logout, status, live }) {
+/* ------------------------------ Sidebar ----------------------------------- */
+// Command-deck left rail (Linear/Vercel/Notion pattern, the strongest dashboard nav).
+// Full 240px on desktop, a 68px icon rail on tablet/mobile (labels hidden, always
+// reachable). Active = cyan bg-tint + a 2px cyan accent bar + cyan text + filled icon.
+function Sidebar({ user, view, setView, logout, status, live }) {
   const tabs = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["supervisor", "admin"] },
     { id: "entry", label: "Shift Entry", icon: ClipboardList, roles: ["operator", "supervisor", "admin"] },
     { id: "plan", label: "Plan Setup", icon: Settings2, roles: ["supervisor", "admin"] },
   ].filter((t) => t.roles.includes(user.role));
   return (
-    <header className="sticky top-0 z-30 bg-gradient-to-b from-[#12161D] to-coal border-b border-hair shadow-card">
-      {/* faint brand accent at the very top edge — kills the flat-top read */}
+    <aside className="fixed inset-y-0 left-0 z-40 flex flex-col w-[68px] lg:w-[240px] bg-coal border-r border-hair transition-[width] duration-200">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/45 to-transparent" aria-hidden="true" />
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
-        <m.div layoutId="prana-mark" className="flex items-center">
-          <Wordmark />
-        </m.div>
-
-        {/* underline indicator (not a solid pill) — Linear/Stripe-caliber; the
-            mobile pill wrapper stays for tap density, desktop goes chrome-less */}
-        <nav aria-label="Primary" className="flex gap-1 sm:gap-2 bg-inset sm:bg-transparent border border-hair sm:border-0 p-1 sm:p-0 rounded-xl order-3 sm:order-2 w-full sm:w-auto">
-          {tabs.map((t) => {
-            const a = view === t.id;
-            return (
-              <button key={t.id} onClick={() => setView(t.id)} aria-current={a ? "page" : undefined} className={`relative flex-1 sm:flex-none px-4 sm:px-5 py-2.5 min-h-[44px] rounded-lg sm:rounded-none text-sm font-semibold transition ${a ? "text-ink" : "text-ink-soft hover:text-ink"}`}>
-                {a && <m.span layoutId="navpill" className="absolute left-3 right-3 -bottom-[5px] h-[2px] rounded-full bg-brand-500" transition={{ type: "spring", stiffness: 380, damping: 32 }} />}
-                <span className="relative z-10">{t.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="flex items-center gap-3 order-2 sm:order-3">
-          {live && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-ok-ink" title="Live — data updates in real time across devices">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-ok opacity-75 motion-safe:animate-ping" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-ok" />
-              </span>
-              Live
-            </span>
-          )}
-          <div className="font-semibold text-sm text-ink-soft">{user.name}</div>
-          <button onClick={logout} title="Log out" aria-label="Log out" className="p-2.5 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><LogOut size={18} /></button>
+      {/* brand — compact mark on the rail, full wordmark on desktop */}
+      <div className="h-16 flex items-center justify-center lg:justify-start lg:px-5 border-b border-hair shrink-0">
+        <span className="lg:hidden font-display font-extrabold text-[19px] text-ink tracking-tight">P</span>
+        <div className="hidden lg:block"><Wordmark /></div>
+      </div>
+      {/* nav */}
+      <nav aria-label="Primary" className="flex-1 py-4 px-2 lg:px-3 space-y-1 overflow-y-auto">
+        {tabs.map((t) => {
+          const a = view === t.id;
+          const Icon = t.icon;
+          return (
+            <button key={t.id} onClick={() => setView(t.id)} aria-current={a ? "page" : undefined} title={t.label}
+              className={`relative w-full flex items-center justify-center lg:justify-start gap-3 min-h-[48px] px-0 lg:px-3 rounded-lg text-sm font-semibold transition ${a ? "bg-brand-500/[0.10] text-brand-200" : "text-ink-soft hover:text-ink hover:bg-white/[0.04]"}`}>
+              {a && <m.span layoutId="navrail" className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-brand-500" transition={{ type: "spring", stiffness: 380, damping: 32 }} />}
+              <Icon size={20} weight={a ? "fill" : "bold"} className="shrink-0" />
+              <span className="hidden lg:block">{t.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+      {/* footer — live status, user, logout */}
+      <div className="border-t border-hair p-3 shrink-0 space-y-2.5">
+        {live && (
+          <div className="flex items-center justify-center lg:justify-start gap-2 lg:px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ok-ink" title="Live — data updates in real time across devices">
+            <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full rounded-full bg-ok opacity-75 motion-safe:animate-ping" /><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-ok" /></span>
+            <span className="hidden lg:block">Live</span>
+          </div>
+        )}
+        <div className="flex items-center justify-center lg:justify-between gap-2">
+          <div className="hidden lg:block min-w-0 font-semibold text-sm text-ink-soft truncate">{user.name}</div>
+          <button onClick={logout} title="Log out" aria-label="Log out" className="p-2.5 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition shrink-0"><LogOut size={18} /></button>
         </div>
       </div>
-    </header>
+    </aside>
   );
 }
 
@@ -659,7 +701,7 @@ function Dashboard({ data, live }) {
 
       {/* GLANCE STATUS — read "are we on track?" in 2 seconds. The traveling
           BorderBeam appears only while the realtime connection is live. */}
-      <div className={`relative overflow-hidden ${PANEL_HERO} ${live ? "border-beam" : ""} rounded-[14px] mb-5`}>
+      <div className={`relative overflow-hidden ${PANEL_HERO} ${live ? "border-beam" : ""} rounded-[10px] mb-5`}>
         <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: STATUS[lvl].hex }} />
         <Crosshair className="absolute top-4 right-4" />
         <div className="p-6 pl-8 pr-10 flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
@@ -718,8 +760,8 @@ function Dashboard({ data, live }) {
                 </defs>
                 <CartesianGrid strokeDasharray="2 6" stroke={HEX.grid} horizontal={false} />
                 <XAxis type="number" domain={[-maxDev, maxDev]} tick={{ fill: HEX.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => (v > 0 ? `+${v}` : v)} height={22} />
-                <YAxis type="category" dataKey="name" width={96} tick={{ fill: HEX.axis2, fontSize: 12 }} axisLine={false} tickLine={false} interval={0} />
-                <Tooltip content={<CompTip />} cursor={{ fill: "rgba(47,75,255,0.05)" }} />
+                <YAxis type="category" dataKey="name" width={108} tick={{ fill: HEX.axis2, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
+                <Tooltip content={<CompTip />} cursor={{ fill: "rgba(94,231,255,0.05)" }} />
                 <ReferenceLine x={0} stroke={HEX.brand} strokeOpacity={0.55} strokeDasharray="3 3" />
                 <Bar dataKey="dev" barSize={16} shape={<DevBar />} isAnimationActive={!REDUCED}>
                   <LabelList content={makeDevLabel(compData)} />
@@ -756,7 +798,7 @@ function Dashboard({ data, live }) {
                 <YAxis domain={[0, trendDomainMax]} allowDecimals={false} tick={{ fill: HEX.axis, fontSize: 12 }} axisLine={false} tickLine={false} width={34} />
                 <Tooltip content={<ChartTip />} cursor={{ stroke: HEX.axis2, strokeDasharray: "4 4", strokeWidth: 1 }} />
                 <ReferenceLine y={dailyTargetRounded} stroke={HEX.axis2} strokeDasharray="5 5" label={{ value: "daily target", fill: HEX.axis2, fontSize: 10, position: "insideTopRight" }} />
-                <Area type="stepAfter" dataKey="actual" name="Output" stroke="url(#splitStroke)" strokeWidth={2.25} fill="url(#splitFill)" style={{ filter: "url(#trendGlow)" }} dot={false} isAnimationActive={!REDUCED} activeDot={{ r: 4, fill: HEX.brand, stroke: "#0B0D12", strokeWidth: 2 }} />
+                <Area type="stepAfter" dataKey="actual" name="Output" stroke="url(#splitStroke)" strokeWidth={2.25} fill="url(#splitFill)" style={{ filter: "url(#trendGlow)" }} dot={false} isAnimationActive={!REDUCED} activeDot={{ r: 4, fill: HEX.brand, stroke: "#020203", strokeWidth: 2 }} />
                 {/* clean overlay carries only the live "now" pulse dot (no glow on it) */}
                 <Area type="stepAfter" dataKey="actual" stroke="none" fill="none" legendType="none" tooltipType="none" isAnimationActive={false} activeDot={false} dot={<PulseDot dataLen={trend.length} />} />
               </AreaChart>
@@ -847,6 +889,8 @@ function ShiftEntry({ data, user, reload }) {
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [delEntry, setDelEntry] = useState(null); // entry pending delete-confirm
+  const [delBusy, setDelBusy] = useState(false);
 
   useEffect(() => { if (!componentId && components[0]) setComponentId(components[0].id); }, [components]);
   useEffect(() => { if (!machineId && machines[0]) setMachineId(machines[0].id); }, [machines]);
@@ -894,6 +938,15 @@ function ShiftEntry({ data, user, reload }) {
     setToast(`Recorded ${compName(componentId)} · Shift ${shift}`); setTimeout(() => setToast(""), 2200);
     await reload();
     setSaving(false);
+  };
+
+  // Destructive: only runs after the focus-trapped ConfirmDialog is confirmed.
+  const confirmDeleteEntry = async () => {
+    if (delBusy || !delEntry) return;
+    setDelBusy(true);
+    try { await db.removeEntry(delEntry.id); await reload(); setDelEntry(null); }
+    catch { /* leave the dialog open so the user can retry */ }
+    finally { setDelBusy(false); }
   };
 
   let recent = [...entries].sort((a, b) => b.created_at - a.created_at);
@@ -957,7 +1010,7 @@ function ShiftEntry({ data, user, reload }) {
 
           {dup && <div className={`${warnCls} mb-3`}><AlertTriangle size={16} className="shrink-0" /><span>You already logged <b>{compName(componentId)}</b> for Shift {shift} on this date. You'll be asked to confirm.</span></div>}
 
-          <button onClick={open} disabled={!componentId} className={`${btnPrimary} !text-base !py-4 disabled:opacity-50 disabled:pointer-events-none`}>Record Output <ArrowRight size={20} className="transition-transform duration-300 ease-[cubic-bezier(.34,1.56,.64,1)] group-hover:translate-x-1" /></button>
+          <button onClick={open} disabled={!componentId} className={`${btnPrimary} !text-base !py-4 disabled:opacity-50 disabled:pointer-events-none`}>Record Output <ArrowRight size={20} className="transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" /></button>
         </Panel>
 
         <Panel title={isManager ? "Recent Entries (all operators)" : "My Recent Entries"} tag="LOG" className="lg:col-span-5">
@@ -974,7 +1027,7 @@ function ShiftEntry({ data, user, reload }) {
                     <div className="font-mono font-bold text-[19px] tnum text-ink leading-none">{e.quantity}</div>
                     <div className="font-mono text-[10px] uppercase tracking-wider text-ink-dim mt-1">units</div>
                   </div>
-                  {isManager && <button onClick={async () => { await db.removeEntry(e.id); await reload(); }} aria-label="Delete entry" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button>}
+                  {isManager && <button onClick={() => setDelEntry(e)} aria-label="Delete entry" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button>}
                 </div>
               </div>
             ))}
@@ -986,7 +1039,7 @@ function ShiftEntry({ data, user, reload }) {
       <AnimatePresence>
         {confirm && (
           <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-base/85 p-4" onClick={closeConfirm}>
-            <m.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ type: "spring", stiffness: 360, damping: 30 }} className="bg-over border border-hair-strong relative overflow-hidden rounded-[14px] border-l-2 border-l-brand-500 p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
+            <m.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ type: "spring", stiffness: 360, damping: 30 }} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4"><h3 id="confirm-title" className="font-display font-bold text-lg">Confirm entry</h3><button onClick={closeConfirm} aria-label="Close" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06]"><X size={18} /></button></div>
               <div className="space-y-2.5 mb-5">
                 {[["Date", date], ["Shift", `Shift ${shift}`], ["Component", compName(componentId)], ["Machine", machName(machineId)], ["Quantity", `${qty} units`], ["Scrap", `${scrap} units`]].map(([k, v]) => (
@@ -998,7 +1051,7 @@ function ShiftEntry({ data, user, reload }) {
               {error && <div className={`${errCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>{error}</span></div>}
               <div className="flex gap-3">
                 <button onClick={closeConfirm} disabled={saving} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</button>
-                <button onClick={doSave} disabled={saving} className="flex-1 py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{saving ? "Saving…" : <><Check size={18} /> Confirm</>}</button>
+                <button onClick={doSave} disabled={saving} className="flex-1 py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-[#04161a] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{saving ? "Saving…" : <><Check size={18} /> Confirm</>}</button>
               </div>
             </m.div>
           </m.div>
@@ -1007,8 +1060,8 @@ function ShiftEntry({ data, user, reload }) {
 
       <AnimatePresence>
         {toast && (
-          <m.div role="status" aria-live="polite" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} className="fixed bottom-5 right-5 z-50 bg-coal border border-hair border-l-2 border-l-ok rounded-r-md shadow-pop px-4 py-3 flex items-center gap-3">
-            <span className="w-5 h-5 rounded-full bg-ok grid place-items-center shrink-0"><Check size={13} className="text-[#0B0D12]" /></span>
+          <m.div role="status" aria-live="polite" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} className="fixed bottom-5 right-5 z-50 bg-coal border border-hair rounded-[8px] shadow-pop px-4 py-3 flex items-center gap-3">
+            <span className="w-5 h-5 rounded-full bg-ok grid place-items-center shrink-0"><Check size={13} className="text-[#020203]" /></span>
             <div>
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">Logged</div>
               <div className="text-ink font-semibold text-sm">{toast}</div>
@@ -1016,6 +1069,17 @@ function ShiftEntry({ data, user, reload }) {
           </m.div>
         )}
       </AnimatePresence>
+
+      <ConfirmDialog
+        open={!!delEntry}
+        title="Delete this entry?"
+        body={delEntry ? <>This permanently removes <b className="text-ink">{compName(delEntry.component_id)}</b> · Shift {delEntry.shift} · <span className="font-mono tnum">{delEntry.quantity}</span> units ({delEntry.production_date}). This can't be undone.</> : null}
+        confirmLabel="Delete entry"
+        danger
+        busy={delBusy}
+        onConfirm={confirmDeleteEntry}
+        onClose={() => { if (!delBusy) setDelEntry(null); }}
+      />
     </>
   );
 }
@@ -1026,12 +1090,21 @@ function PlanSetup({ data, reload }) {
   const month = curMonth();
   const [name, setName] = useState(""); const [code, setCode] = useState(""); const [industry, setIndustry] = useState("railway");
   const [adding, setAdding] = useState(false);
+  const [delComp, setDelComp] = useState(null); // component pending remove-confirm
+  const [delBusy, setDelBusy] = useState(false);
 
   const planFor = (cid) => plans.find((p) => p.component_id === cid);
   const changeTarget = async (cid, v) => { const p = planFor(cid); await db.upsertPlan({ month, component_id: cid, target_qty: parseInt(v, 10) || 0, working_days: p?.working_days ?? 26 }); await reload(); };
   const changeWD = async (cid, v) => { const p = planFor(cid); await db.upsertPlan({ month, component_id: cid, target_qty: p?.target_qty ?? 0, working_days: Math.max(1, parseInt(v, 10) || 1) }); await reload(); };
   const addComponent = async () => { if (!name.trim() || adding) return; setAdding(true); try { await db.addComponent({ code: code.trim(), name: name.trim(), industry }); setName(""); setCode(""); await reload(); } finally { setAdding(false); } };
-  const removeComponent = async (id) => { await db.deactivateComponent(id); await reload(); };
+  // Destructive: only runs after the focus-trapped ConfirmDialog is confirmed.
+  const confirmRemoveComponent = async () => {
+    if (delBusy || !delComp) return;
+    setDelBusy(true);
+    try { await db.deactivateComponent(delComp.id); await reload(); setDelComp(null); }
+    catch { /* leave the dialog open so the user can retry */ }
+    finally { setDelBusy(false); }
+  };
 
   return (
     <>
@@ -1081,7 +1154,7 @@ function PlanSetup({ data, reload }) {
                     <td className="py-3 px-2.5 text-right"><input type="number" min="1" defaultValue={wd} onBlur={(e) => changeWD(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={cellCls} /></td>
                     <td className="py-3 px-2.5 text-right font-bold text-brand-300 font-mono tnum">{daily.toFixed(1)}</td>
                     <td className="py-3 px-2.5 text-right text-ink-soft font-mono tnum">{(daily / 3).toFixed(1)}</td>
-                    <td className="py-3 px-2.5"><button onClick={() => removeComponent(c.id)} aria-label="Remove component" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button></td>
+                    <td className="py-3 px-2.5"><button onClick={() => setDelComp(c)} aria-label={`Remove ${c.name}`} className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button></td>
                   </tr>
                 );
               })}
@@ -1090,6 +1163,17 @@ function PlanSetup({ data, reload }) {
         </div>
         <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Edit a target or working days and click away (or press Enter) to save. Removing a component hides it but keeps its production history.</span></div>
       </Panel>
+
+      <ConfirmDialog
+        open={!!delComp}
+        title="Remove this component?"
+        body={delComp ? <>This hides <b className="text-ink">{delComp.name}</b>{delComp.code ? ` (${delComp.code})` : ""} from entry and planning. Its production history is kept, and you can re-add it later.</> : null}
+        confirmLabel="Remove component"
+        danger
+        busy={delBusy}
+        onConfirm={confirmRemoveComponent}
+        onClose={() => { if (!delBusy) setDelComp(null); }}
+      />
     </>
   );
 }
@@ -1098,13 +1182,56 @@ function PlanSetup({ data, reload }) {
 const inputCls = "w-full px-4 py-3 bg-inset border border-hair-strong rounded-xl text-ink text-[15px] font-medium placeholder-ink-dim focus:border-brand-500 outline-none transition";
 const cellCls = "w-24 px-2.5 py-2.5 min-h-[44px] text-right bg-inset border border-hair-strong rounded-lg font-semibold text-ink font-mono tnum focus:border-brand-500 outline-none transition";
 const labelCls = "block font-mono text-ink-soft text-[11px] font-semibold uppercase tracking-[0.12em] mb-2";
-const btnPrimary = "group w-full py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)]";
+const btnPrimary = "group w-full py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-[#04161a] font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)]";
 // Two tiers keep blue on the CTA only: primary = solid brand (btnPrimary);
 // secondary = neutral inset + ring, brand showing ONLY on hover (non-CTA actions).
 const btnSecondary = "min-h-[44px] px-4 py-3 rounded-lg bg-inset ring-1 ring-hair-strong text-ink font-semibold text-sm flex items-center justify-center gap-2 transition hover:ring-brand-500/50 hover:bg-brand-500/[0.08] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none";
 const hintCls = "flex gap-2 text-[13px] text-ink-soft bg-inset border border-hair rounded-xl px-3.5 py-3 leading-relaxed";
 const warnCls = "flex items-center gap-2 text-sm text-warn-ink bg-warn-soft border border-warn/25 px-3.5 py-3 rounded-xl leading-snug";
 const errCls = "flex items-center gap-2 text-sm text-bad-ink bg-bad-soft border border-bad/25 px-3.5 py-3 rounded-xl leading-snug";
+
+// Reusable focus-trapped confirm dialog for DESTRUCTIVE actions (ARIA dialog pattern:
+// move focus in on open, trap Tab, Esc cancels, focus restored to the trigger on close).
+function ConfirmDialog({ open, title, body, confirmLabel = "Confirm", danger = false, busy = false, onConfirm, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement;
+    const focusables = () => ref.current
+      ? [...ref.current.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      : [];
+    focusables()[0]?.focus();
+    const onKey = (e) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab") return;
+      const f = focusables(); if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); prev?.focus?.(); };
+  }, [open]);
+  return (
+    <AnimatePresence>
+      {open && (
+        <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-base/85 p-4" onClick={onClose}>
+          <m.div ref={ref} role="dialog" aria-modal="true" aria-labelledby="confirm-dlg-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ type: "spring", stiffness: 360, damping: 30 }} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 id="confirm-dlg-title" className="font-display font-bold text-lg">{title}</h3>
+              <button onClick={onClose} aria-label="Cancel" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06]"><X size={18} /></button>
+            </div>
+            {body && <div className="text-sm text-ink-soft leading-relaxed mb-5">{body}</div>}
+            <div className="flex gap-3">
+              <button onClick={onClose} disabled={busy} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</button>
+              <button onClick={onConfirm} disabled={busy} className={`flex-1 py-3.5 rounded-lg font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${danger ? "bg-[#C8362C] hover:bg-[#B02C23] text-white" : "bg-brand-500 hover:bg-brand-600 text-[#04161a]"}`}>{busy ? "Working…" : confirmLabel}</button>
+            </div>
+          </m.div>
+        </m.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 // Machined gauge — a squared track with hairline tick dividers (an engineering
 // meter, not a consumer pill bar). Fills once on mount; status-coloured.
@@ -1128,7 +1255,7 @@ function Kpi({ title, value, unit, sub, subLevel, pct, pctNeutral, spark, sparkL
   const sparkId = `kpi-${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
   return (
     <m.div variants={itemV} whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300, damping: 22 }} onPointerMove={spotlightMove}
-      className={`spotlight overflow-hidden [contain:content] ${PANEL} rounded-[14px] p-5 hover:bg-inset/40 hover:border-brand-500/40 hover:shadow-card-hover transition`}>
+      className={`spotlight overflow-hidden [contain:content] ${PANEL} rounded-[10px] p-5 hover:bg-inset/40 hover:border-brand-500/40 hover:shadow-card-hover transition`}>
       <Eyebrow className="!text-[11px]">{title}</Eyebrow>
       <div className="mt-2.5 flex items-baseline gap-1.5">
         <span className="font-mono text-[32px] font-bold leading-none tnum text-ink">{typeof value === "number" ? <AnimatedNumber value={value} /> : value}</span>
@@ -1158,10 +1285,10 @@ function Kpi({ title, value, unit, sub, subLevel, pct, pctNeutral, spark, sparkL
 }
 
 const Panel = ({ title, right, tag, children, className = "", hero = false }) => (
-  <div onPointerMove={hero ? spotlightMove : undefined} className={`${hero ? `${PANEL_HERO} spotlight` : PANEL} rounded-[14px] p-5 ${className}`}>
+  <div onPointerMove={hero ? spotlightMove : undefined} className={`${hero ? `${PANEL_HERO} spotlight` : PANEL} rounded-[10px] p-5 ${className}`}>
     <div className="flex items-center justify-between gap-3 mb-5">
       <div className="flex items-center gap-2.5">
-        {tag && <span className="font-mono text-[10px] text-ink-dim border border-hair rounded px-1.5 py-0.5 tracking-wider">{tag}</span>}
+        {tag && <span className="font-mono text-[10px] text-brand-300/80 border border-hair px-1.5 py-0.5 tracking-wider">//{tag}</span>}
         <span className="font-display font-semibold text-[15px] text-ink">{title}</span>
       </div>
       {right}
