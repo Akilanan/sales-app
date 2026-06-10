@@ -22,3 +22,4 @@ yarn-error.log*
 .playwright-mcp/
 .refs/
 .claude/
+.claude-flow/

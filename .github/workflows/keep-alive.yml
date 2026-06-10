@@ -1,0 +1,27 @@
+# Daily Supabase keep-alive — free tier pauses projects after ~7 days idle.
+# Calls the public.keepalive() RPC (migration 0006): a real DB round-trip,
+# zero data exposed. Repo secrets needed: SUPABASE_URL, SUPABASE_ANON_KEY.
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "23 2 * * *" # daily 02:23 UTC (~07:53 IST)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call keepalive RPC
+        run: |
+          code=$(curl -s -o /tmp/out -w "%{http_code}" \
+            -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/rpc/keepalive" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          echo "response: $(cat /tmp/out)"
+          if [ "$code" != "200" ]; then
+            echo "keepalive failed with HTTP $code"
+            exit 1
+          fi

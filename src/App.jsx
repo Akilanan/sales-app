@@ -8,9 +8,18 @@ import {
   SquaresFour as LayoutDashboard, ClipboardText as ClipboardList,
   SlidersHorizontal as Settings2, Plus, Trash as Trash2, Check, SignOut as LogOut, X,
   TrendUp as TrendingUp, TrendDown as TrendingDown, Clock, ArrowRight,
-  Warning as AlertTriangle, ShieldCheck, Backspace as Delete, Minus,
+  Warning as AlertTriangle, ShieldCheck, Backspace as Delete, Minus, Eye, EyeSlash,
 } from "@phosphor-icons/react";
 import { db, seedIfEmpty, MODE, CONFIG_ERROR } from "./lib/db";
+import ScrollExpandMedia from "./components/ui/ScrollExpandMedia";
+import { LiquidButton, MetalButton } from "./components/ui/buttons";
+import { NavBar } from "./components/ui/tubelight-navbar";
+import { EtheralShadow } from "./components/ui/etheral-shadow";
+
+// Login hero imagery (industrial). onError in ScrollExpandMedia falls back from
+// the expanding media to the background photo, so a 404 never shows a broken icon.
+const HERO_BG = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1920&q=80";
+const HERO_MEDIA = "https://images.unsplash.com/photo-1504917595217-d4dc5ebe6122?auto=format&fit=crop&w=1500&q=80";
 
 /* ============================================================================
    PRANA VENTURE — "COLD STEEL" UI · arctic graphite, ONE solid electric-blue
@@ -52,8 +61,8 @@ class SceneBoundary extends React.Component {
 // Cool, single-source static fallback — never the blotchy multi-radial blob.
 function StaticGlow({ variant = "ambient" }) {
   const bg = variant === "hero"
-    ? "radial-gradient(58% 52% at 66% 32%, rgba(94,231,255,0.14), transparent 70%), radial-gradient(48% 44% at 14% 98%, rgba(120,138,180,0.06), transparent 72%)"
-    : "radial-gradient(46% 42% at 84% 18%, rgba(94,231,255,0.08), transparent 72%)";
+    ? "radial-gradient(58% 52% at 66% 32%, rgba(96,165,250,0.14), transparent 70%), radial-gradient(48% 44% at 14% 98%, rgba(120,138,180,0.06), transparent 72%)"
+    : "radial-gradient(46% 42% at 84% 18%, rgba(96,165,250,0.08), transparent 72%)";
   return <div className={`${variant === "hero" ? "absolute" : "fixed"} inset-0 pointer-events-none`} style={{ zIndex: 0, background: bg }} aria-hidden="true" />;
 }
 
@@ -71,17 +80,6 @@ function useReducedMotion() {
   return reduced;
 }
 
-// Live cinematic 3D is reserved for the login hero (fast work screens by design).
-function LoginScene() {
-  const reduced = useReducedMotion();
-  if (reduced || LOW_POWER || NO_WEBGL) return <StaticGlow variant="hero" />;
-  return (
-    <SceneBoundary>
-      <Suspense fallback={<StaticGlow variant="hero" />}><Ambient variant="hero" /></Suspense>
-    </SceneBoundary>
-  );
-}
-
 const SHIFTS = [
   { id: 1, label: "Shift 1", time: "06:00 – 14:00" },
   { id: 2, label: "Shift 2", time: "14:00 – 22:00" },
@@ -93,14 +91,18 @@ const todayStr = () => new Date().toLocaleDateString("en-CA");
 const curMonth = () => todayStr().slice(0, 7);
 const prettyMonth = (m) => { const [y, mo] = m.split("-"); return new Date(y, mo - 1).toLocaleString("en", { month: "long", year: "numeric" }); };
 
+// Monochrome status (user prefers this over colorful — he saw the colorful
+// shadcn charts and explicitly reverted): on-track recedes (dim gray), behind
+// brighter gray, critical = brightest (white). brightness = urgency.
 const STATUS = {
-  ok: { label: "On Track", text: "text-ok-ink", soft: "bg-ok-soft", solid: "bg-ok", hex: "#3FB969", Icon: TrendingUp },
-  warn: { label: "Behind", text: "text-warn-ink", soft: "bg-warn-soft", solid: "bg-warn", hex: "#E0A53C", Icon: AlertTriangle },
-  bad: { label: "Critical", text: "text-bad-ink", soft: "bg-bad-soft", solid: "bg-bad", hex: "#F1564C", Icon: TrendingDown },
+  ok: { label: "On Track", text: "text-ok-ink", soft: "bg-ok-soft", solid: "bg-ok", hex: "#52525B", Icon: TrendingUp },
+  warn: { label: "Behind", text: "text-warn-ink", soft: "bg-warn-soft", solid: "bg-warn", hex: "#A1A1AA", Icon: AlertTriangle },
+  bad: { label: "Critical", text: "text-bad-ink", soft: "bg-bad-soft", solid: "bg-bad", hex: "#FAFAFA", Icon: TrendingDown },
 };
 const levelForPct = (p) => (p >= 100 ? "ok" : p >= 80 ? "warn" : "bad");
 const levelForPace = (pace) => (pace >= 0.97 ? "ok" : pace >= 0.85 ? "warn" : "bad");
-const HEX = { brand: "#5EE7FF", grid: "rgba(120,180,200,0.08)", ghost: "rgba(120,180,200,0.14)", axis: "#6B7682", axis2: "#A1A1AA" };
+// brand accent = white (mono) — live trend dot/glow + zero rail.
+const HEX = { brand: "#FAFAFA", grid: "rgba(255,255,255,0.07)", ghost: "rgba(255,255,255,0.12)", axis: "#71717A", axis2: "#A1A1AA" };
 // Bespoke chart tooltip — a matte spec-card with a brand left-rule echoing the
 // dashboard status rail. No drop shadow (the system is flat, not floating-glass).
 function ChartTip({ active, payload, label, unit = "units" }) {
@@ -134,7 +136,7 @@ function ChartTip({ active, payload, label, unit = "units" }) {
   );
 }
 
-const PANEL = "bg-panel border border-hair shadow-card";
+const PANEL = "bg-gradient-to-b from-panelhi/30 to-panel border border-hair shadow-card";
 // Hero surfaces (glance banner, top chart panels): a faint top-edge luminance
 // gradient + brighter top hairline so the upper edge catches light — the fix for
 // "reads flat/dark at top". Used sparingly (overuse = template tell).
@@ -167,47 +169,14 @@ const Wordmark = ({ size = "sm" }) => (
     <div className={`font-display font-bold tracking-[0.015em] leading-none ${size === "lg" ? "text-lg" : "text-[15px]"}`}>
       PRANA <span className="text-ink-dim font-semibold">VENTURE</span>
     </div>
-    <div className="font-mono text-ink-dim text-[10px] tracking-[0.22em] uppercase mt-1.5">Production Console</div>
+    <div className="hidden sm:block font-mono text-ink-dim text-[10px] tracking-[0.22em] uppercase mt-1.5">Production Console</div>
   </div>
-);
-
-// Crosshair registration marks — lusion's precision motif. Tasteful, sparse.
-const Crosshair = ({ className = "" }) => (
-  <svg width="13" height="13" viewBox="0 0 13 13" className={`text-ink-dim/60 ${className}`} fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true">
-    <path d="M6.5 0 V13 M0 6.5 H13" />
-  </svg>
 );
 
 // Mono technical eyebrow / annotation.
 const Eyebrow = ({ children, className = "" }) => (
   <div className={`font-mono text-[11px] tracking-[0.2em] uppercase text-ink-soft ${className}`}>{children}</div>
 );
-
-// Magnetic wrapper — the body drifts toward the cursor, springs back. Desktop +
-// fine-pointer ONLY (gated), so shop-floor touch tablets never see it.
-function Magnetic({ children, strength = 0.3, className = "" }) {
-  const ref = useRef(null);
-  const x = useMotionValue(0);
-  const y = useMotionValue(0);
-  const sx = useSpring(x, { stiffness: 150, damping: 15, mass: 0.1 });
-  const sy = useSpring(y, { stiffness: 150, damping: 15, mass: 0.1 });
-  const on = useRef(false);
-  useEffect(() => {
-    on.current = typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-  }, []);
-  const move = (e) => {
-    if (!on.current || !ref.current) return;
-    const r = ref.current.getBoundingClientRect();
-    x.set((e.clientX - (r.left + r.width / 2)) * strength);
-    y.set((e.clientY - (r.top + r.height / 2)) * strength);
-  };
-  const reset = () => { x.set(0); y.set(0); };
-  return (
-    <m.div ref={ref} onMouseMove={move} onMouseLeave={reset} style={{ x: sx, y: sy }} className={className}>
-      {children}
-    </m.div>
-  );
-}
 
 // Per-letter staggered reveal (one-shot on mount). aria-label carries the real
 // text; the animated letters are aria-hidden. Falls back to static under reduced-motion.
@@ -246,7 +215,7 @@ function VarianceChip({ delta, pct, level }) {
   );
 }
 // Bar fill: neutral steel when on-plan, colour ONLY for misses (HPHMI: colour = exception).
-const barFill = (pct) => (pct >= 100 ? "#5C6573" : STATUS[levelForPct(pct)].hex);
+const barFill = (pct) => (pct >= 100 ? "#71717A" : STATUS[levelForPct(pct)].hex);
 
 // Rounded-rect SVG path with per-corner radii — lets the diverging deviation bars
 // round only the outer tip while staying square against the zero rail.
@@ -296,7 +265,7 @@ function PulseDot({ cx, cy, index, dataLen }) {
           <animate attributeName="stroke-opacity" values="0.55;0" dur="1.9s" repeatCount="indefinite" />
         </circle>
       )}
-      <circle cx={cx} cy={cy} r="3.5" fill={HEX.brand} stroke="#020203" strokeWidth="2" />
+      <circle cx={cx} cy={cy} r="3.5" fill={HEX.brand} stroke="#0A0A0A" strokeWidth="2" />
     </g>
   );
 }
@@ -401,6 +370,14 @@ export default function App() {
     );
   // Cinematic threshold: login blur-fades out, the app fades in, and the PRANA
   // wordmark (shared layoutId) flies from the login lockup into the header nav.
+  const navTabs = user
+    ? [
+        { id: "dashboard", name: "Dashboard", icon: LayoutDashboard, roles: ["supervisor", "admin"] },
+        { id: "entry", name: "Shift Entry", icon: ClipboardList, roles: ["operator", "supervisor", "admin"] },
+        { id: "plan", name: "Plan Setup", icon: Settings2, roles: ["supervisor", "admin"] },
+      ].filter((t) => t.roles.includes(user.role))
+    : [];
+  const activeTabName = (navTabs.find((t) => t.id === view) || navTabs[0] || {}).name;
   return (
     <AnimatePresence mode="wait">
       {!user ? (
@@ -409,8 +386,25 @@ export default function App() {
         </m.div>
       ) : (
         <m.div key="app" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="min-h-[100dvh] text-ink relative">
-          <Sidebar user={user} view={view} setView={setView} logout={logout} status={appStatus} live={live} />
-          <div className="pl-[68px] lg:pl-[240px] transition-[padding] duration-200">
+          {/* Tubelight nav (replaces the sidebar — user's pick): floating pill,
+              top-center on desktop, bottom thumb-bar on phones. */}
+          <NavBar items={navTabs} activeTab={activeTabName} onItemClick={(t) => setView(t.id)} />
+          {/* Slim fixed header: wordmark left (layoutId flight target from the
+              login lockup) + live status, user, logout right. */}
+          <header className="fixed top-0 inset-x-0 z-40 h-16 px-4 sm:px-6 flex items-center justify-between pointer-events-none bg-gradient-to-b from-base via-base/75 to-transparent">
+            <div className="pointer-events-auto"><Wordmark /></div>
+            <div className="pointer-events-auto flex items-center gap-3">
+              {live && (
+                <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ok-ink" title="Live — data updates in real time across devices">
+                  <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full rounded-full bg-ok opacity-75 motion-safe:animate-ping" /><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-ok" /></span>
+                  <span className="hidden lg:block">Live</span>
+                </div>
+              )}
+              <div className="hidden lg:block font-semibold text-sm text-ink-soft max-w-[160px] truncate">{user.name}</div>
+              <button onClick={logout} title="Log out" aria-label="Log out" className="p-2.5 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-ink transition shrink-0"><LogOut size={18} /></button>
+            </div>
+          </header>
+          <div className="pt-20 pb-24 sm:pb-0">
             <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
               <AnimatePresence mode="wait">
                 <m.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
@@ -428,22 +422,6 @@ export default function App() {
 }
 
 /* ------------------------------ Login ------------------------------------- */
-// A "production heartbeat" — output cadence drawn once on mount with a live
-// trailing pulse. A bespoke mark a generated layout never has.
-function Heartbeat() {
-  const d = "M0 26 H86 l8 -15 l10 28 l9 -34 l10 40 l8 -19 H148 l7 -10 l9 20 l8 -10 H300";
-  return (
-    <svg viewBox="0 0 300 52" className="w-full max-w-[300px] h-10 text-brand-400" fill="none" preserveAspectRatio="none" aria-hidden="true">
-      <m.path d={d} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-        initial={{ pathLength: 0, opacity: 0 }} animate={{ pathLength: 1, opacity: 0.9 }}
-        transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1], delay: 0.35 }} />
-      <m.circle r="2.6" fill="currentColor"
-        initial={{ cx: 0, cy: 26, opacity: 0 }} animate={{ cx: 300, opacity: [0, 1, 1, 0] }}
-        transition={{ duration: 3.2, ease: "linear", delay: 1.9, repeat: Infinity, repeatDelay: 1.4 }} />
-    </svg>
-  );
-}
-
 function LoginScreen({ onLogin }) {
   const [mode, setMode] = useState("operator");
   const [pin, setPin] = useState("");
@@ -451,13 +429,14 @@ function LoginScreen({ onLogin }) {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [pending, setPending] = useState(false); // async auth in flight → block double-submit
+  const [showPw, setShowPw] = useState(false);
 
   const press = (d) => { if (pending) return; setErr(""); setPin((p) => (p.length < 6 ? p + d : p)); };
   const back = () => { if (!pending) setPin((p) => p.slice(0, -1)); };
   const pinLogin = async () => {
     if (pending || pin.length === 0) return;
     setPending(true);
-    try { const u = await db.loginByPin(pin); if (u) { onLogin(u); } else { setErr("Invalid PIN. Try 1001, 1002 or 1003."); setPin(""); } }
+    try { const u = await db.loginByPin(pin); if (u) { onLogin(u); } else { setErr(MODE === "local" ? "Invalid PIN. Try 1001, 1002 or 1003." : "Invalid PIN."); setPin(""); } }
     catch { setErr("Sign-in failed. Please try again."); }
     finally { setPending(false); }
   };
@@ -473,47 +452,35 @@ function LoginScreen({ onLogin }) {
   const Key = ({ children, onClick, variant, label, disabled }) => (
     <m.button onClick={onClick} disabled={disabled} aria-label={label}
       whileTap={disabled ? undefined : { scale: 0.95 }} transition={{ type: "spring", stiffness: 400, damping: 25, mass: 0.6 }}
-      className={`h-16 rounded-xl grid place-items-center text-2xl font-semibold transition-colors disabled:opacity-50 disabled:pointer-events-none ${
-        variant === "go" ? "bg-brand-500 text-[#04161a] hover:bg-brand-600 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)]"
-        : variant === "back" ? "bg-inset border border-hair text-ink-soft hover:text-ink hover:border-white/15"
-        : "bg-inset border border-hair text-ink font-mono hover:border-brand-500/55 hover:bg-white/[0.04]"}`}>{children}</m.button>
+      className={`h-16 rounded-xl grid place-items-center text-2xl font-semibold transition-[filter,transform] duration-200 disabled:opacity-50 disabled:pointer-events-none ${
+        variant === "go" ? "bg-gradient-to-b from-brand-300 to-brand-500 text-zinc-900 border-b-2 border-brand-700/70 ring-1 ring-inset ring-white/20 shadow-[0_4px_14px_-3px_rgba(0,0,0,0.55)] hover:brightness-110 active:brightness-95"
+        : variant === "back" ? "bg-gradient-to-b from-inset to-[#1c1c21] border border-b-2 border-black/40 ring-1 ring-inset ring-white/[0.06] text-ink-soft hover:text-ink hover:brightness-115"
+        : "bg-gradient-to-b from-inset to-[#1c1c21] border border-b-2 border-black/40 ring-1 ring-inset ring-white/[0.06] text-ink font-mono hover:brightness-115 active:brightness-95"}`}>{children}</m.button>
   );
 
   const modes = [["operator", "Operator"], ["manager", "Manager"]];
 
   return (
-    <main className="min-h-[100dvh] w-full text-ink lg:grid lg:grid-cols-[1.12fr_minmax(400px,42%)]">
-      {/* LEFT — full-bleed matte 3D + minimal hero copy (desktop only).
-          Decluttered: one headline owns the frame, the lit part floats upper-right. */}
-      <section className="relative hidden lg:flex flex-col justify-end overflow-hidden px-12 xl:px-16 py-14 border-r border-hair">
-        <LoginScene />
-        {/* scrim: darken lower-left for legible copy, leave the upper-right object clear */}
-        <div className="absolute inset-0 z-[1] pointer-events-none" style={{ background: "radial-gradient(82% 82% at 0% 100%, rgba(11,13,18,0.92) 0%, rgba(11,13,18,0.28) 46%, rgba(11,13,18,0) 66%), linear-gradient(90deg, rgba(11,13,18,0.6) 0%, rgba(11,13,18,0) 42%)" }} />
-        {/* cinematic CSS grade — soft blue bloom behind the part + edge vignette (zero WebGL cost) */}
-        <div className="absolute inset-0 z-[2] pointer-events-none" style={{ background: "radial-gradient(44% 42% at 68% 36%, rgba(94,231,255,0.11), transparent 68%), radial-gradient(125% 120% at 52% 42%, transparent 58%, rgba(4,6,11,0.6) 100%)" }} />
-        {/* crosshair registration marks */}
-        <Crosshair className="absolute z-[2] top-10 right-10" />
-        <Crosshair className="absolute z-[2] top-10 left-12" />
-        <Crosshair className="absolute z-[2] bottom-10 right-1/3" />
-
-        <div className="relative z-10 max-w-md pb-1">
-          <h1 className="font-display text-[clamp(2.4rem,4.2vw,3.6rem)] font-extrabold leading-[1.0] tracking-[-0.03em]" aria-label="Built on the shop floor.">
-            <SplitReveal lines={["Built on the", "shop floor."]} />
-          </h1>
-          <p className="mt-6 text-ink-soft text-[15px] leading-relaxed max-w-sm">
-            Operators log output after every shift. Plan-versus-actual updates in real time, on any tablet on the line.
-          </p>
-          <div className="mt-8"><Heartbeat /></div>
+    <ScrollExpandMedia
+      mediaSrc={HERO_MEDIA}
+      bgImageSrc={HERO_BG}
+      title="PRANA VENTURE"
+      date="Production Console"
+      scrollToExpand="Scroll · or tap the image to enter"
+      enterLabel="Enter Console"
+    >
+      {/* etheral-shadow smoke fills the revealed section behind the sign-in card
+          (gray on black — already monochrome; reduced-motion renders it static) */}
+      <div className="absolute inset-0" aria-hidden="true">
+        <EtheralShadow color="rgba(128, 128, 128, 1)" animation={{ scale: 100, speed: 90 }} noise={{ opacity: 1, scale: 1.2 }} sizing="fill" />
+      </div>
+      {/* sign-in revealed once the hero media fully expands */}
+      <m.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        className="relative w-full max-w-[380px] rounded-2xl border border-hair bg-panel/85 backdrop-blur-xl shadow-pop p-6 sm:p-7">
+        {/* brand lockup */}
+        <div className="mb-6">
+          <Wordmark />
         </div>
-      </section>
-
-      {/* RIGHT — solid form panel (subtle top-down depth to match the cards) */}
-      <section className="relative flex items-center justify-center px-6 py-10 sm:px-10 bg-gradient-to-b from-[#121620] to-coal min-h-[100dvh]">
-        <m.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} className="w-full max-w-[360px]">
-          {/* brand lockup */}
-          <m.div className="mb-8">
-            <Wordmark />
-          </m.div>
 
           <div className="mb-7">
             <Eyebrow className="mb-3">Sign in</Eyebrow>
@@ -526,7 +493,7 @@ function LoginScreen({ onLogin }) {
             <m.div className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-lg bg-brand-500"
               animate={{ x: mode === "operator" ? 0 : "100%" }} transition={{ type: "spring", stiffness: 380, damping: 32 }} />
             {modes.map(([id, label]) => (
-              <button key={id} onClick={() => { setMode(id); setErr(""); }} aria-pressed={mode === id} className={`relative z-10 min-h-[44px] py-3 rounded-lg text-sm font-semibold transition-colors ${mode === id ? "text-[#04161a]" : "text-ink-soft hover:text-ink"}`}>{label}</button>
+              <button key={id} onClick={() => { setMode(id); setErr(""); }} aria-pressed={mode === id} className={`relative z-10 min-h-[44px] py-3 rounded-lg text-sm font-semibold transition-colors ${mode === id ? "text-zinc-900" : "text-ink-soft hover:text-ink"}`}>{label}</button>
             ))}
           </div>
 
@@ -554,9 +521,14 @@ function LoginScreen({ onLogin }) {
                   </div>
                   <div>
                     <label htmlFor="login-password" className={labelCls}>Password</label>
-                    <input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setErr(""); }} placeholder="••••••••" className={inputCls} />
+                    <div className="relative">
+                      <input id="login-password" name="password" type={showPw ? "text" : "password"} autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setErr(""); }} placeholder="••••••••" className={`${inputCls} pr-12`} />
+                      <button type="button" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? "Hide password" : "Show password"} aria-pressed={showPw} className="absolute inset-y-0 right-0 w-12 grid place-items-center text-ink-dim hover:text-ink focus-visible:text-ink transition">
+                        {showPw ? <EyeSlash size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
                   </div>
-                  <Magnetic className="w-full"><button type="submit" disabled={pending} className="group w-full py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-[#04161a] font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{pending ? "Signing in…" : <>Log in <ArrowRight size={18} className="transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" /></>}</button></Magnetic>
+                  <LiquidButton type="submit" size="xl" disabled={pending} className="group w-full mt-1">{pending ? "Signing in…" : <>Log in <ArrowRight size={18} className="transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" /></>}</LiquidButton>
                 </form>
               </m.div>
             )}
@@ -571,16 +543,16 @@ function LoginScreen({ onLogin }) {
               DEMO ACCESS · PIN <span className="text-ink-soft">1001</span> · MANAGER <span className="text-ink-soft">admin / admin123</span>
             </div>
           )}
-        </m.div>
-      </section>
-    </main>
+      </m.div>
+    </ScrollExpandMedia>
   );
 }
 
 /* ------------------------------ Sidebar ----------------------------------- */
-// Command-deck left rail (Linear/Vercel/Notion pattern, the strongest dashboard nav).
-// Full 240px on desktop, a 68px icon rail on tablet/mobile (labels hidden, always
-// reachable). Active = cyan bg-tint + a 2px cyan accent bar + cyan text + filled icon.
+// UNWIRED (kept for cheap reversal): replaced by the tubelight NavBar + slim
+// fixed header (user's pick from his pasted components). To restore, swap the
+// <NavBar/>+<header/> block in App back to <Sidebar .../> + pl-[68px] wrapper.
+// Original notes: command-deck left rail, 240px desktop / 68px icon rail.
 function Sidebar({ user, view, setView, logout, status, live }) {
   const tabs = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["supervisor", "admin"] },
@@ -740,7 +712,7 @@ function Dashboard({ data, live }) {
         <Panel title="Pace vs Plan — by Component" tag="01" hero className="lg:col-span-7" right={
           <span className="hidden sm:flex items-center gap-3 font-mono text-[10px] uppercase tracking-wider text-ink-dim">
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-[2px] bg-bad" />behind</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-[2px]" style={{ background: "#5C6573" }} />on / ahead</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-[2px]" style={{ background: "#71717A" }} />on / ahead</span>
           </span>
         }>
           {compData.length === 0 ? <Empty msg="Set monthly targets in Plan Setup to see this chart." /> : (
@@ -754,14 +726,14 @@ function Dashboard({ data, live }) {
                     </linearGradient>
                   ))}
                   <linearGradient id="dev-steel" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#5C6573" stopOpacity={0.45} />
-                    <stop offset="100%" stopColor="#5C6573" stopOpacity={0.95} />
+                    <stop offset="0%" stopColor="#71717A" stopOpacity={0.45} />
+                    <stop offset="100%" stopColor="#71717A" stopOpacity={0.95} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="2 6" stroke={HEX.grid} horizontal={false} />
                 <XAxis type="number" domain={[-maxDev, maxDev]} tick={{ fill: HEX.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => (v > 0 ? `+${v}` : v)} height={22} />
                 <YAxis type="category" dataKey="name" width={108} tick={{ fill: HEX.axis2, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
-                <Tooltip content={<CompTip />} cursor={{ fill: "rgba(94,231,255,0.05)" }} />
+                <Tooltip content={<CompTip />} cursor={{ fill: "rgba(96,165,250,0.05)" }} />
                 <ReferenceLine x={0} stroke={HEX.brand} strokeOpacity={0.55} strokeDasharray="3 3" />
                 <Bar dataKey="dev" barSize={16} shape={<DevBar />} isAnimationActive={!REDUCED}>
                   <LabelList content={makeDevLabel(compData)} />
@@ -798,7 +770,7 @@ function Dashboard({ data, live }) {
                 <YAxis domain={[0, trendDomainMax]} allowDecimals={false} tick={{ fill: HEX.axis, fontSize: 12 }} axisLine={false} tickLine={false} width={34} />
                 <Tooltip content={<ChartTip />} cursor={{ stroke: HEX.axis2, strokeDasharray: "4 4", strokeWidth: 1 }} />
                 <ReferenceLine y={dailyTargetRounded} stroke={HEX.axis2} strokeDasharray="5 5" label={{ value: "daily target", fill: HEX.axis2, fontSize: 10, position: "insideTopRight" }} />
-                <Area type="stepAfter" dataKey="actual" name="Output" stroke="url(#splitStroke)" strokeWidth={2.25} fill="url(#splitFill)" style={{ filter: "url(#trendGlow)" }} dot={false} isAnimationActive={!REDUCED} activeDot={{ r: 4, fill: HEX.brand, stroke: "#020203", strokeWidth: 2 }} />
+                <Area type="stepAfter" dataKey="actual" name="Output" stroke="url(#splitStroke)" strokeWidth={2.25} fill="url(#splitFill)" style={{ filter: "url(#trendGlow)" }} dot={false} isAnimationActive={!REDUCED} activeDot={{ r: 4, fill: HEX.brand, stroke: "#0A0A0A", strokeWidth: 2 }} />
                 {/* clean overlay carries only the live "now" pulse dot (no glow on it) */}
                 <Area type="stepAfter" dataKey="actual" stroke="none" fill="none" legendType="none" tooltipType="none" isAnimationActive={false} activeDot={false} dot={<PulseDot dataLen={trend.length} />} />
               </AreaChart>
@@ -1010,7 +982,7 @@ function ShiftEntry({ data, user, reload }) {
 
           {dup && <div className={`${warnCls} mb-3`}><AlertTriangle size={16} className="shrink-0" /><span>You already logged <b>{compName(componentId)}</b> for Shift {shift} on this date. You'll be asked to confirm.</span></div>}
 
-          <button onClick={open} disabled={!componentId} className={`${btnPrimary} !text-base !py-4 disabled:opacity-50 disabled:pointer-events-none`}>Record Output <ArrowRight size={20} className="transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" /></button>
+          <LiquidButton onClick={open} disabled={!componentId} size="xl" className="group w-full text-base disabled:opacity-50 disabled:pointer-events-none">Record Output <ArrowRight size={20} className="transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" /></LiquidButton>
         </Panel>
 
         <Panel title={isManager ? "Recent Entries (all operators)" : "My Recent Entries"} tag="LOG" className="lg:col-span-5">
@@ -1050,8 +1022,8 @@ function ShiftEntry({ data, user, reload }) {
               {dup && <div className={`${warnCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>A matching entry already exists for this shift. Confirm only if this is additional output.</span></div>}
               {error && <div className={`${errCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>{error}</span></div>}
               <div className="flex gap-3">
-                <button onClick={closeConfirm} disabled={saving} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</button>
-                <button onClick={doSave} disabled={saving} className="flex-1 py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-[#04161a] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{saving ? "Saving…" : <><Check size={18} /> Confirm</>}</button>
+                <m.button onClick={closeConfirm} disabled={saving} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 420, damping: 26, mass: 0.6 }} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</m.button>
+                <m.button onClick={doSave} disabled={saving} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 420, damping: 26, mass: 0.6 }} className="flex-1 py-3.5 rounded-lg bg-gradient-to-b from-brand-300 to-brand-500 text-zinc-900 border-b-2 border-brand-700/70 ring-1 ring-inset ring-white/20 hover:brightness-110 active:brightness-95 font-semibold transition flex items-center justify-center gap-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{saving ? "Saving…" : <><Check size={18} /> Confirm</>}</m.button>
               </div>
             </m.div>
           </m.div>
@@ -1061,7 +1033,7 @@ function ShiftEntry({ data, user, reload }) {
       <AnimatePresence>
         {toast && (
           <m.div role="status" aria-live="polite" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} className="fixed bottom-5 right-5 z-50 bg-coal border border-hair rounded-[8px] shadow-pop px-4 py-3 flex items-center gap-3">
-            <span className="w-5 h-5 rounded-full bg-ok grid place-items-center shrink-0"><Check size={13} className="text-[#020203]" /></span>
+            <span className="w-5 h-5 rounded-full bg-ok grid place-items-center shrink-0"><Check size={13} className="text-[#0A0A0A]" /></span>
             <div>
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">Logged</div>
               <div className="text-ink font-semibold text-sm">{toast}</div>
@@ -1131,7 +1103,7 @@ function PlanSetup({ data, reload }) {
               <button key={ind} onClick={() => setIndustry(ind)} aria-pressed={industry === ind} className={`min-h-[44px] py-2.5 rounded-lg border text-xs font-semibold capitalize transition active:scale-95 ${industry === ind ? "border-brand-500 bg-brand-500/[0.10] text-brand-200 ring-1 ring-brand-500/30" : "border-hair bg-inset text-ink-soft hover:border-brand-500/40"}`}>{ind}</button>
             ))}
           </div>
-          <button onClick={addComponent} disabled={!name.trim() || adding} className={`${btnPrimary} disabled:opacity-50 disabled:pointer-events-none`}>{adding ? "Adding…" : <><Plus size={18} /> Add Component</>}</button>
+          <MetalButton onClick={addComponent} disabled={!name.trim() || adding} fullWidth className="disabled:opacity-50 disabled:pointer-events-none">{adding ? "Adding…" : <><Plus size={18} /> Add Component</>}</MetalButton>
         </Panel>
       </div>
 
@@ -1182,10 +1154,12 @@ function PlanSetup({ data, reload }) {
 const inputCls = "w-full px-4 py-3 bg-inset border border-hair-strong rounded-xl text-ink text-[15px] font-medium placeholder-ink-dim focus:border-brand-500 outline-none transition";
 const cellCls = "w-24 px-2.5 py-2.5 min-h-[44px] text-right bg-inset border border-hair-strong rounded-lg font-semibold text-ink font-mono tnum focus:border-brand-500 outline-none transition";
 const labelCls = "block font-mono text-ink-soft text-[11px] font-semibold uppercase tracking-[0.12em] mb-2";
-const btnPrimary = "group w-full py-3.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-[#04161a] font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)]";
+// Tactile premium button — gradient fill + inset white ring + darker bottom border
+// + soft brand glow; press = brightness + 1px settle. (Instrument-grade, no gimmick.)
+const btnPrimary = "group relative w-full py-3.5 rounded-lg bg-gradient-to-b from-brand-300 to-brand-500 text-zinc-900 font-semibold text-[15px] flex items-center justify-center gap-2 border border-b-2 border-brand-700/70 ring-1 ring-inset ring-white/20 shadow-[0_4px_14px_-3px_rgba(0,0,0,0.55)] transition-[filter,transform] duration-200 hover:brightness-110 active:brightness-95 active:translate-y-px";
 // Two tiers keep blue on the CTA only: primary = solid brand (btnPrimary);
 // secondary = neutral inset + ring, brand showing ONLY on hover (non-CTA actions).
-const btnSecondary = "min-h-[44px] px-4 py-3 rounded-lg bg-inset ring-1 ring-hair-strong text-ink font-semibold text-sm flex items-center justify-center gap-2 transition hover:ring-brand-500/50 hover:bg-brand-500/[0.08] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none";
+const btnSecondary = "min-h-[44px] px-4 py-3 rounded-lg bg-gradient-to-b from-inset to-[#1c1c21] text-ink font-semibold text-sm flex items-center justify-center gap-2 border border-b-2 border-black/40 ring-1 ring-inset ring-white/[0.07] transition-[filter,transform] duration-200 hover:brightness-115 active:brightness-95 active:translate-y-px disabled:opacity-50 disabled:pointer-events-none";
 const hintCls = "flex gap-2 text-[13px] text-ink-soft bg-inset border border-hair rounded-xl px-3.5 py-3 leading-relaxed";
 const warnCls = "flex items-center gap-2 text-sm text-warn-ink bg-warn-soft border border-warn/25 px-3.5 py-3 rounded-xl leading-snug";
 const errCls = "flex items-center gap-2 text-sm text-bad-ink bg-bad-soft border border-bad/25 px-3.5 py-3 rounded-xl leading-snug";
@@ -1223,8 +1197,10 @@ function ConfirmDialog({ open, title, body, confirmLabel = "Confirm", danger = f
             </div>
             {body && <div className="text-sm text-ink-soft leading-relaxed mb-5">{body}</div>}
             <div className="flex gap-3">
-              <button onClick={onClose} disabled={busy} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</button>
-              <button onClick={onConfirm} disabled={busy} className={`flex-1 py-3.5 rounded-lg font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${danger ? "bg-[#C8362C] hover:bg-[#B02C23] text-white" : "bg-brand-500 hover:bg-brand-600 text-[#04161a]"}`}>{busy ? "Working…" : confirmLabel}</button>
+              <m.button onClick={onClose} disabled={busy} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 420, damping: 26, mass: 0.6 }} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</m.button>
+              <div className="flex-1">
+                <MetalButton onClick={onConfirm} disabled={busy} fullWidth variant={danger ? "error" : "default"} className="disabled:opacity-60 disabled:cursor-not-allowed">{busy ? "Working…" : confirmLabel}</MetalButton>
+              </div>
             </div>
           </m.div>
         </m.div>
@@ -1263,7 +1239,7 @@ function Kpi({ title, value, unit, sub, subLevel, pct, pctNeutral, spark, sparkL
       </div>
       {sub && <div className={`text-[12px] font-semibold mt-2 leading-snug ${subLevel ? STATUS[subLevel].text : "text-ink-soft"}`}>{sub}</div>}
       {typeof pct === "number" && (
-        <div className="mt-3.5"><Meter pct={pct} level={pctNeutral ? null : subLevel} color={pctNeutral ? "#5C6573" : undefined} height="h-1.5" ticks /></div>
+        <div className="mt-3.5"><Meter pct={pct} level={pctNeutral ? null : subLevel} color={pctNeutral ? "#71717A" : undefined} height="h-1.5" ticks /></div>
       )}
       {spark && spark.length > 1 && (
         <div className="mt-3.5 -mb-1 h-9">
@@ -1304,6 +1280,14 @@ const PageHead = ({ title, sub }) => (
     <h1 className="font-display text-[clamp(1.5rem,2.6vw,1.75rem)] font-extrabold tracking-[-0.01em] leading-none text-ink">{title}</h1>
     <div className="text-ink-soft text-sm mt-2">{sub}</div>
   </div>
+);
+
+// Decorative corner tick (a small "+") used on the glance banner and empty
+// states — purely ornamental, hidden from AT.
+const Crosshair = ({ className = "" }) => (
+  <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" className={`text-ink-dim/60 ${className}`}>
+    <path d="M5 0v10M0 5h10" stroke="currentColor" strokeWidth="1" />
+  </svg>
 );
 
 const Empty = ({ msg }) => (

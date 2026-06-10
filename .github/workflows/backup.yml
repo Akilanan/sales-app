@@ -1,0 +1,42 @@
+# Nightly database backup — Supabase free tier has NO managed backups.
+# pg_dump over the Session Pooler (IPv4) connection, gzipped, stored as a
+# GitHub Actions artifact (90-day retention, private repo).
+#
+# Repo secret needed: SUPABASE_DB_URL — the **Session pooler** URI from
+# Supabase → Connect → Session pooler (IPv4-compatible), with the DB password
+# filled in, e.g.:
+#   postgresql://postgres.czfhyqvpfulpwpsgempf:<PASSWORD>@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
+name: Nightly DB backup
+
+on:
+  schedule:
+    - cron: "47 21 * * *" # daily 21:47 UTC (~03:17 IST)
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install postgresql-client-17 (server is PG17; client must match)
+        run: |
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -yqq postgresql-client-17
+
+      - name: pg_dump (schema + data, no owners/grants)
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          ts=$(date -u +%Y%m%d-%H%M%S)
+          /usr/lib/postgresql/17/bin/pg_dump "$DB_URL" --no-owner --no-privileges -f "backup-$ts.sql"
+          gzip "backup-$ts.sql"
+          ls -la backup-*.sql.gz
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: backup-*.sql.gz
+          retention-days: 90
+          if-no-files-found: error

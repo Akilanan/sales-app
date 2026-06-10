@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* NEUTRAL BASE — all decorative styling (aurora, grain, custom scrollbar, spotlight,
+   border-beam, custom cursor) has been stripped. This is a plain scaffold awaiting a
+   new design. Only functional rules remain (reduced-motion, focus, number/date inputs,
+   tabular figures). */
+
 :root {
   color-scheme: dark;
 }
@@ -13,7 +18,7 @@ body,
 html {
   scroll-behavior: smooth;
 }
-/* respect reduced-motion globally — the belt to the JS 3D fallback */
+/* respect reduced-motion globally */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -26,87 +31,25 @@ html {
 }
 body {
   margin: 0;
-  /* surface-0 canvas: a faint top-down cool light (gives the page a light
-     direction so it never reads flat) over a barely-there engineering grid */
-  background-color: #07090c;
-  background-image:
-    radial-gradient(120% 70% at 50% -12%, rgba(34, 211, 238, 0.06), transparent 58%),
-    linear-gradient(rgba(120, 180, 200, 0.016) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(120, 180, 200, 0.016) 1px, transparent 1px);
-  background-size: 100% 100%, 48px 48px, 48px 48px;
-  background-attachment: fixed, scroll, scroll;
-  color: #f2f6f7;
+  background-color: #0a0a0a;
+  /* faint top-down light gives the page a premium light direction (not flat) */
+  background-image: radial-gradient(120% 80% at 50% -20%, rgba(255, 255, 255, 0.035), transparent 60%);
+  background-attachment: fixed;
+  color: #fafafa;
   font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Living AURORA substrate — 3 slow blurry colour-glows that drift behind the
-   panels (the "Linear look"). Opaque cards block it over data, so it only breathes
-   through the gutters/header. Overscanned + transform-animated (GPU-cheap). */
-body::before {
-  content: "";
-  position: fixed;
-  inset: -25%;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(38% 38% at 18% 16%, rgba(34, 211, 238, 0.16), transparent 60%),
-    radial-gradient(40% 40% at 85% 4%, rgba(20, 90, 110, 0.14), transparent 62%),
-    radial-gradient(44% 44% at 62% 90%, rgba(139, 92, 246, 0.12), transparent 64%);
-  filter: blur(10px);
-  animation: aura 36s ease-in-out infinite;
-  will-change: transform;
-}
-@keyframes aura {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(-3.5%, 2.5%, 0) scale(1.09); }
-}
-
-/* Fine film grain — analog texture that reads as crafted, not generated */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  pointer-events: none;
-  opacity: 0.02;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-::-webkit-scrollbar {
-  width: 11px;
-  height: 11px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(94, 231, 255, 0.18);
-  border-radius: 6px;
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(94, 231, 255, 0.30);
-  background-clip: content-box;
-}
 ::selection {
-  background: rgba(94, 231, 255, 0.3);
-  color: #f2f6f7;
+  background: rgba(255, 255, 255, 0.2);
+  color: #0a0a0a;
 }
-/* crisp machined edge, not a soft glow halo */
 *:focus-visible {
-  outline: 2px solid #5ee7ff;
+  outline: 2px solid #e4e4e7;
   outline-offset: 2px;
 }
-/* hide the native cursor only when the bespoke Cursor component is active
-   (desktop mouse only — touch tablets never get this class) */
-.cursor-none,
-.cursor-none * {
-  cursor: none !important;
-}
-/* fully remove number spinners (not just dim them) on every engine */
+/* fully remove number spinners */
 input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
@@ -118,66 +61,6 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .tnum {
   font-variant-numeric: tabular-nums;
-}
-
-/* Spotlight — a faint Klein-blue halo that follows the cursor across a card.
-   A JS handler writes pointer x/y to --mx/--my (no React re-render). Fine-pointer
-   desktops only; shop-floor touch tablets never paint it. */
-.spotlight {
-  position: relative;
-}
-@media (hover: hover) and (pointer: fine) {
-  .spotlight::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: radial-gradient(
-      420px circle at var(--mx, -40%) var(--my, -40%),
-      rgba(94, 231, 255, 0.13),
-      transparent 45%
-    );
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-    z-index: 1;
-  }
-  .spotlight:hover::after {
-    opacity: 1;
-  }
-}
-
-/* BorderBeam — one Klein-blue light traveling the rounded border of the single
-   live panel, signaling realtime. Masked to a 1px ring; freezes to a static arc
-   under reduced-motion via the global belt above. */
-@property --beam-a {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-.border-beam::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(
-    from var(--beam-a),
-    transparent 0 70%,
-    #5ee7ff 84%,
-    #8b5cf6 90%,
-    transparent 96%
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  animation: beam-spin 4.5s linear infinite;
-}
-@keyframes beam-spin {
-  to {
-    --beam-a: 360deg;
-  }
 }
 /* dark native date picker */
 input[type="date"]::-webkit-calendar-picker-indicator {

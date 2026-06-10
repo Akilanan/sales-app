@@ -4,37 +4,38 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // Command Deck: ONE clean premium sans carries display + body + labels
-        // (Impeccable product register: one family is often right); JetBrains Mono
-        // for ALL numbers/data/codes = engineering-grade tabular figures.
+        // Premium in-brand — IBM Plex Sans for UI (distinctive, not Inter), JetBrains
+        // Mono for all numbers/data (tabular, engineering-grade).
         sans: ["'IBM Plex Sans'", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
         display: ["'IBM Plex Sans'", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       colors: {
-        // "Tactical Ops-Console" — near-black canvas, gunmetal surfaces, ONE cyan
-        // signal accent + a restrained violet secondary (adopted from Aura's Tactical
-        // Intelligence Platform). Status = production state ONLY (green/amber/red).
-        // 5-step luminance elevation ladder (near-black → gunmetal) — each child sits
-        // one step lighter than its parent so nesting reads as real planes, not flat DOM.
-        base: "#07090C", // surface-0 canvas (near-black, lifted off pure #000 → no halation)
-        coal: "#0B0E12", // surface-1 sidebar / header band / deep wells
-        panel: "#11141A", // surface-2 cards / KPI / chart panels / glance
-        panelhi: "#171B22", // top-edge luminance for hero surfaces (gradient TO panel)
-        inset: "#1A1F27", // surface-3 raised: tracks/inputs/keycaps INSIDE a card, hover
-        over: "#222834", // surface-4 overlays: modal / dropdown / confirm
-        hair: "rgba(120,180,200,0.08)", // cool/cyan-tinted hairline
-        "hair-strong": "rgba(34,211,238,0.16)", // input outline / active ring (cyan)
-        ink: { DEFAULT: "#F2F6F7", soft: "#A1A1AA", dim: "#6B7682" },
-        // brand = CYAN signal (proven cyan scale; buttons use DARK text on cyan — white-on-cyan fails AA)
-        brand: { 200: "#A5F3FC", 300: "#67E8F9", 400: "#5EE7FF", 500: "#22D3EE", 600: "#06B6D4", 700: "#0E7490" },
-        // restrained secondary accent (one rare role: realtime / a single 2nd series)
-        viol: { DEFAULT: "#8B5CF6", soft: "rgba(139,92,246,0.14)", ink: "#B9A6FF" },
-        steel: { DEFAULT: "#5C6573", soft: "#828C9C" },
-        // status — reserved strictly for "are we on track?"
-        ok: { DEFAULT: "#3FB969", soft: "rgba(63,185,105,0.13)", ink: "#76D89A" },
-        warn: { DEFAULT: "#E0A53C", soft: "rgba(224,165,60,0.13)", ink: "#F0C36A" },
-        bad: { DEFAULT: "#F1564C", soft: "rgba(241,86,76,0.13)", ink: "#FF8B83" },
+        // Premium in-brand — refined zinc-dark surfaces with gradient depth, ONE
+        // confident blue accent (tactile gradient buttons), instrument-grade.
+        base: "#0A0A0A", // surface-0 canvas (pure zinc, no tint)
+        coal: "#131313", // surface-1 sidebar / header band
+        panel: "#18181B", // surface-2 cards / panels (zinc-900)
+        panelhi: "#212124", // top-edge luminance → premium gradient surfaces (gradient TO panel)
+        inset: "#262629", // surface-3 raised: inputs / tracks
+        over: "#2D2D30", // surface-4 overlays: modal / dropdown
+        hair: "rgba(255,255,255,0.08)",
+        "hair-strong": "rgba(255,255,255,0.18)",
+        ink: { DEFAULT: "#FAFAFA", soft: "#A1A1AA", dim: "#71717A" },
+        // MONOCHROME accent — silver/white scale (active states = white/silver tint;
+        // primary buttons = silver-metal gradient with DARK text).
+        brand: { 200: "#FAFAFA", 300: "#F4F4F5", 400: "#E4E4E7", 500: "#D4D4D8", 600: "#A1A1AA", 700: "#71717A" },
+        viol: { DEFAULT: "#8B5CF6", soft: "rgba(139,92,246,0.14)", ink: "#C4B5FD" },
+        steel: { DEFAULT: "#71717A", soft: "#A1A1AA" },
+        // shadcn chart palette (dark) — the exact --chart-1..5 tokens from the
+        // pasted theme: blue / green / orange / purple / pink. Categorical series.
+        chart: { 1: "#2662D9", 2: "#2EB88A", 3: "#E88C30", 4: "#AF57DB", 5: "#E23670" },
+        // status — MONOCHROME (user prefers this over colorful): on-track recedes
+        // (dim gray), behind brighter gray, critical = brightest (white). Brightness
+        // = urgency, zero color. The `chart` tokens above stay defined but unused.
+        ok: { DEFAULT: "#52525B", soft: "rgba(82,82,91,0.18)", ink: "#A1A1AA" },
+        warn: { DEFAULT: "#A1A1AA", soft: "rgba(161,161,170,0.16)", ink: "#D4D4D8" },
+        bad: { DEFAULT: "#FAFAFA", soft: "rgba(255,255,255,0.16)", ink: "#FAFAFA" },
       },
       // Command Deck radius: 8px is the proven library norm (50% of 621). Tiered so the
       // whole app updates via the scale; arbitrary panel radii handled in App.jsx.
@@ -54,13 +55,13 @@ export default {
         hero: "inset 0 1px 0 0 rgba(255,255,255,0.10), inset 0 0 0 1px rgba(255,255,255,0.045), 0 18px 46px -18px rgba(0,0,0,0.74)",
         raise: "inset 0 1px 0 0 rgba(255,255,255,0.08), inset 0 0 0 1px rgba(255,255,255,0.04), 0 22px 55px -20px rgba(0,0,0,0.8)",
         pop: "inset 0 1px 0 0 rgba(255,255,255,0.09), inset 0 0 0 1px rgba(255,255,255,0.05), 0 48px 95px -26px rgba(0,0,0,0.85)",
-        ring: "0 0 0 1px rgba(94,231,255,0.5)",
+        ring: "0 0 0 1px rgba(255,255,255,0.5)",
       },
       keyframes: {
         "pulse-dot": {
-          "0%": { boxShadow: "0 0 0 0 rgba(94,231,255,0.5)" },
-          "70%": { boxShadow: "0 0 0 5px rgba(94,231,255,0)" },
-          "100%": { boxShadow: "0 0 0 0 rgba(94,231,255,0)" },
+          "0%": { boxShadow: "0 0 0 0 rgba(255,255,255,0.5)" },
+          "70%": { boxShadow: "0 0 0 5px rgba(255,255,255,0)" },
+          "100%": { boxShadow: "0 0 0 0 rgba(255,255,255,0)" },
         },
       },
       animation: {
