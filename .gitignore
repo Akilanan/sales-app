@@ -23,3 +23,4 @@ yarn-error.log*
 .refs/
 .claude/
 .claude-flow/
+OPERATOR-SECRET.local.txt

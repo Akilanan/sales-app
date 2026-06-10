@@ -8,11 +8,15 @@
 // supabase.auth.setSession(...) with those tokens.
 //
 // Required secret (set once):  OPERATOR_SECRET  — MUST equal the value passed to
-// the seed (`npm run seed:prod`). SUPABASE_URL / SUPABASE_ANON_KEY are injected
-// by the platform automatically.
+// the seed (`npm run seed:prod`). SUPABASE_URL is injected by the platform.
 //
-// verify_jwt stays ON: supabase.functions.invoke sends the public anon key as a
-// valid JWT (gateway passes it); the real auth is the PIN check below.
+// verify_jwt is OFF (2026-06-10): the app now authenticates with the modern
+// sb_publishable_ key, which is NOT a JWT — the gateway's JWT check would 401
+// every request (UNAUTHORIZED_INVALID_JWT_FORMAT). The real auth here is the
+// PIN check below; legacy anon/service_role keys are disabled project-wide.
+// The publishable key is PUBLIC BY DESIGN (ships in every browser bundle), so
+// the fallback constant below is not a secret. Override via PUBLIC_API_KEY if
+// the key is ever re-issued.
 // ============================================================================
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
@@ -39,7 +43,8 @@ Deno.serve(async (req: Request) => {
   if (!/^\d{3,8}$/.test(pin)) return json({ error: "Invalid PIN" }, 400);
 
   const url = Deno.env.get("SUPABASE_URL");
-  const anon = Deno.env.get("SUPABASE_ANON_KEY");
+  // Publishable key, public by design — legacy SUPABASE_ANON_KEY is disabled.
+  const anon = Deno.env.get("PUBLIC_API_KEY") || "sb_publishable__IXhCraP8eubLff_21AVjg_D7a473F8";
   const secret = Deno.env.get("OPERATOR_SECRET");
   if (!url || !anon || !secret) return json({ error: "Server not configured" }, 500);
 
