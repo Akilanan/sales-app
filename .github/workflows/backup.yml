@@ -1,11 +1,14 @@
 # Nightly database backup — Supabase free tier has NO managed backups.
-# pg_dump over the Session Pooler (IPv4) connection, gzipped, stored as a
+# pg_dump over the Session Pooler (IPv4 — required: GitHub runners are IPv4,
+# direct db.<ref>.supabase.co is IPv6-only on free tier), gzipped, stored as a
 # GitHub Actions artifact (90-day retention, private repo).
 #
-# Repo secret needed: SUPABASE_DB_URL — the **Session pooler** URI from
-# Supabase → Connect → Session pooler (IPv4-compatible), with the DB password
-# filled in, e.g.:
-#   postgresql://postgres.czfhyqvpfulpwpsgempf:<PASSWORD>@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
+# Only ONE repo secret needed: SUPABASE_DB_PASSWORD — your database password.
+# (Host/port/user are NOT secret and are set below. Password-as-PGPASSWORD
+# avoids URL-encoding pitfalls when the password contains @ : / # etc.)
+# Connection facts confirmed from the dashboard Connect → Session pooler:
+#   host=aws-1-ap-northeast-1.pooler.supabase.com  port=5432
+#   user=postgres.czfhyqvpfulpwpsgempf  db=postgres
 name: Nightly DB backup
 
 on:
@@ -26,10 +29,15 @@ jobs:
 
       - name: pg_dump (schema + data, no owners/grants)
         env:
-          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           ts=$(date -u +%Y%m%d-%H%M%S)
-          /usr/lib/postgresql/17/bin/pg_dump "$DB_URL" --no-owner --no-privileges -f "backup-$ts.sql"
+          /usr/lib/postgresql/17/bin/pg_dump \
+            --host=aws-1-ap-northeast-1.pooler.supabase.com \
+            --port=5432 \
+            --username=postgres.czfhyqvpfulpwpsgempf \
+            --dbname=postgres \
+            --no-owner --no-privileges -f "backup-$ts.sql"
           gzip "backup-$ts.sql"
           ls -la backup-*.sql.gz
 
