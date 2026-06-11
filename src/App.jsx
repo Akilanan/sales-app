@@ -857,7 +857,7 @@ function Dashboard({ data, live }) {
         const targetHr = Number(settings.target_hr) || 2200;
         const activeM = machines.filter((m) => m.active !== false);
         const planned = activeM.filter((m) => machinePlan.some((l) => l.machine_id === m.id));
-        const loads = planned.map((m) => { const d = machineLoadDays(m.id, machinePlan, operations); const cap = m.working_days || 24; return { m, d, cap, pct: Math.round((d / cap) * 100) }; });
+        const loads = planned.map((m) => { const d = machineLoadDays(m.id, machinePlan, operations); const cap = (m.working_days || 24) * ((m.shifts || 3) / 3); return { m, d, cap, pct: cap ? Math.round((d / cap) * 100) : 0 }; });
         const overbooked = loads.filter((x) => x.pct > 100).length;
         const avgPct = loads.length ? Math.round(loads.reduce((a, x) => a + x.pct, 0) / loads.length) : 0;
         const opsByComp = {}; for (const o of operations) (opsByComp[o.component_id] ||= []).push(o);
@@ -1316,7 +1316,7 @@ function MachinePlanVsActual({ machine, lines, operations, components, entries }
         <table className="w-full min-w-[640px]">
           <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.14em] border-b border-hair">
             <th className="py-2.5 px-2">Part</th>
-            <th className="py-2.5 px-2 text-right">Plan Qty</th><th className="py-2.5 px-2 text-right">Actual</th>
+            <th className="py-2.5 px-2 text-right">Plan Qty</th><th className="py-2.5 px-2 text-right">Actual</th><th className="py-2.5 px-2 text-right">Variance</th>
             <th className="py-2.5 px-2 text-right">Plan Days</th><th className="py-2.5 px-2 text-right">Act Days</th>
             <th className="py-2.5 px-2 text-right">Scrap</th><th className="py-2.5 px-2 w-40">Progress</th>
           </tr></thead>
@@ -1326,6 +1326,7 @@ function MachinePlanVsActual({ machine, lines, operations, components, entries }
               const a = actualFor(l.component_id);
               const planDays = componentCapacity(ops, l.qty).days;
               const actDays = componentCapacity(ops, a.qty).days;
+              const variance = a.qty - l.qty;
               const pct = l.qty ? Math.round((a.qty / l.qty) * 100) : 0;
               const tone = pct >= 100 ? "bg-ok text-ok-ink" : pct >= 60 ? "bg-warn text-warn-ink" : "bg-bad text-bad-ink";
               return (
@@ -1333,6 +1334,7 @@ function MachinePlanVsActual({ machine, lines, operations, components, entries }
                   <td className="py-2.5 px-2 font-semibold text-sm">{nameOf(l.component_id)}</td>
                   <td className="py-2.5 px-2 text-right font-mono tnum">{l.qty}</td>
                   <td className="py-2.5 px-2 text-right font-mono font-bold text-ink tnum">{a.qty}</td>
+                  <td className={`py-2.5 px-2 text-right font-mono tnum ${variance >= 0 ? "text-ok-ink" : "text-bad-ink"}`}>{variance > 0 ? "+" : ""}{variance}</td>
                   <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round1(planDays)}</td>
                   <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round1(actDays)}</td>
                   <td className="py-2.5 px-2 text-right font-mono text-ink-dim tnum">{a.scrap || "—"}</td>
@@ -1501,11 +1503,13 @@ function MachineLoading({ data, reload }) {
 
   if (!active.length) return <><PageHead title="Machine Loading" sub="Assign parts to machines and see capacity" /><div className="mt-6"><Empty msg="No machines yet. Seed your machines first." /></div></>;
 
-  const wd = (m) => (m && m.working_days) || MACHINE_DAYS;
+  // Machine capacity in 3-shift-equivalent days: a 1-shift machine has 1/3 the
+  // daily output, so its capacity = working_days × shifts/3 (matches the sheets).
+  const wd = (m) => round1(((m && m.working_days) || MACHINE_DAYS) * (((m && m.shifts) || 3) / 3));
   const lines = (machinePlan || []).filter((l) => l.machine_id === sel.id);
   const selDays = machineLoadDays(sel.id, machinePlan, operations);
   const selCap = wd(sel);
-  const selPct = Math.round((selDays / selCap) * 100);
+  const selPct = selCap ? Math.round((selDays / selCap) * 100) : 0;
   const compName = (id) => components.find((c) => c.id === id)?.name || "?";
   const compOps = (id) => (operations || []).filter((o) => o.component_id === id);
 
@@ -1607,6 +1611,108 @@ function MachineLoading({ data, reload }) {
 
       <ConfirmDialog open={!!delLine} title="Remove from machine plan?" body={delLine ? <>Remove <b className="text-ink">{compName(delLine.component_id)}</b> from {sel.name}'s plan?</> : null} confirmLabel="Remove" danger busy={delBusy} onConfirm={confirmDel} onClose={() => { if (!delBusy) setDelLine(null); }} />
     </>
+  );
+}
+
+// In-app Excel import: read an HMC&VMC .xls, pull each part's operations, match
+// to components, preview, apply. SheetJS is lazy-loaded so it never bloats the
+// main bundle.
+function ExcelImport({ data, reload }) {
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState("");
+  const [err, setErr] = useState("");
+
+  const matchComp = (desc, comps) => {
+    const d = (desc || "").toLowerCase();
+    for (const c of comps) if (c.code && d.includes(String(c.code).toLowerCase())) return c;
+    for (const c of comps) {
+      const toks = (c.name || "").toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 3);
+      if (toks.some((t) => d.includes(t))) return c;
+    }
+    return null;
+  };
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErr(""); setDone(""); setBusy(true);
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const comps = (data.components || []).filter((c) => c.active !== false);
+      const yr = String(new Date().getFullYear());
+      const found = {};
+      for (const name of wb.SheetNames) {
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: "" });
+        const headText = rows.slice(0, 4).flat().join(" ");
+        if (!/production plan/i.test(headText) || (!headText.includes(yr) && !/202\d/.test(headText))) continue;
+        // only current-year sheets (skip stale tabs)
+        if (!new RegExp(yr).test(headText)) continue;
+        for (const r of rows) {
+          const desc = String(r[5] || "").trim();
+          const opno = Number(r[6]); const cy = Number(r[7]); const st = Number(r[8]); const ins = Number(r[9]) || 60;
+          if (!desc || !Number.isFinite(opno) || opno <= 0 || !Number.isFinite(cy)) continue;
+          if (/descrip|pallet|shift/i.test(desc)) continue;
+          const c = matchComp(desc, comps);
+          const key = c ? `${c.id}|${opno}` : `?${desc}|${opno}`;
+          found[key] = { desc, op_no: opno, cycle: cy, setup: st || 0, ins, comp: c };
+        }
+      }
+      const list = Object.values(found).sort((a, b) => (a.comp?.name || a.desc).localeCompare(b.comp?.name || b.desc) || a.op_no - b.op_no);
+      if (!list.length) { setErr("No operation rows found in a current-year plan sheet. Is this the HMC&VMC plan file?"); }
+      else setPreview({ list, matched: list.filter((x) => x.comp).length, unmatched: list.filter((x) => !x.comp).length });
+    } catch (ex) { setErr("Could not read the file: " + (ex.message || ex)); }
+    finally { setBusy(false); e.target.value = ""; }
+  };
+
+  const apply = async () => {
+    if (!preview || busy) return;
+    setBusy(true); setErr("");
+    let n = 0;
+    try {
+      for (const o of preview.list) {
+        if (!o.comp) continue;
+        const ex = (data.operations || []).find((x) => x.component_id === o.comp.id && Number(x.op_no) === o.op_no);
+        if (ex) await db.updateOperation(ex.id, { cycle_time: o.cycle, setup_time: o.setup, insertion_time: o.ins });
+        else await db.addOperation({ component_id: o.comp.id, op_no: o.op_no, cycle_time: o.cycle, setup_time: o.setup, insertion_time: o.ins });
+        n++;
+      }
+      setDone(`Imported ${n} operations from your Excel.`); setPreview(null); await reload();
+    } catch (ex) { setErr("Import failed: " + (ex.message || ex)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Panel title="Import from Excel" tag="06" className="mt-4">
+      <p className="text-ink-soft text-sm mb-3 -mt-1">Upload your HMC&amp;VMC .xls — the app reads each part's operations (op no, cycle, setup, insertion time) from the current-year plan sheets and fills them in, matching parts by code or name.</p>
+      <label className="inline-flex items-center gap-2 cursor-pointer text-sm font-semibold px-4 py-2.5 rounded-lg bg-inset border border-hair-strong text-ink hover:border-brand-500/40 transition">
+        <input type="file" accept=".xls,.xlsx" onChange={onFile} className="hidden" disabled={busy} />
+        {busy && !preview ? "Reading…" : "Choose .xls file"}
+      </label>
+      {err && <div role="alert" className={`${errCls} mt-3`}><AlertTriangle size={15} className="shrink-0" />{err}</div>}
+      {done && <div className={`${hintCls} mt-3`}><Check size={14} className="text-ok-ink shrink-0 mt-0.5" /><span>{done}</span></div>}
+      {preview && (
+        <div className="mt-4">
+          <div className="text-sm text-ink-soft mb-2"><b className="text-ink">{preview.matched}</b> operations matched to your parts{preview.unmatched ? `, ${preview.unmatched} unmatched (will be skipped)` : ""}:</div>
+          <div className="max-h-56 overflow-y-auto border border-hair rounded-lg">
+            <table className="w-full text-[12px]">
+              <tbody>
+                {preview.list.map((o, i) => (
+                  <tr key={i} className="border-b border-hair last:border-0">
+                    <td className="py-1.5 px-2.5 font-semibold">{o.comp ? o.comp.name : <span className="text-warn-ink">{o.desc} · no match</span>}</td>
+                    <td className="py-1.5 px-2.5 font-mono text-ink-dim">op{o.op_no}</td>
+                    <td className="py-1.5 px-2.5 font-mono text-right text-ink-soft tnum">cy {o.cycle} · set {o.setup}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <MetalButton onClick={apply} disabled={busy || !preview.matched} className="mt-3 disabled:opacity-50 disabled:pointer-events-none">{busy ? "Importing…" : <><Plus size={16} /> Import {preview.matched} operations</>}</MetalButton>
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -1832,6 +1938,7 @@ function PlanSetup({ data, reload }) {
 
       <div className="mt-4"><OperationsPanel data={data} reload={reload} /></div>
       <SettingsPanel data={data} reload={reload} />
+      <ExcelImport data={data} reload={reload} />
 
       <ConfirmDialog
         open={!!delComp}
