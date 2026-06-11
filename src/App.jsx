@@ -1209,6 +1209,57 @@ function TeamAdmin({ user }) {
   );
 }
 
+/* ------------------- Sheet view — the Excel replica ----------------------- */
+// A full per-machine table that mirrors the HMC&VMC sheet columns end-to-end:
+// Description, Opn, Cy/Set/Ins time, Plan Qty, MC/LB/Total/Eff hours, Total
+// Days, Start/End date. Read-only report built from Phases 1-3 data.
+function MachineSheet({ machine, lines, operations, components }) {
+  const opsByComp = {};
+  for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
+  const sched = scheduleMachine(lines, opsByComp, curMonth());
+  const nameOf = (id) => (components || []).find((c) => c.id === id)?.name || "?";
+
+  // build full rows (hours breakdown per op) aligned with the schedule order
+  const rows = sched.map((s) => {
+    const op = (opsByComp[s.component_id] || []).find((o) => o.op_no === s.op_no) || {};
+    const h = opHours({ qty: s.qty, cycle_time: op.cycle_time, setup_time: op.setup_time, insertion_time: op.insertion_time });
+    return { name: nameOf(s.component_id), op_no: s.op_no, cy: op.cycle_time, set: op.setup_time, ins: op.insertion_time, qty: s.qty, ...h, start: s.start, end: s.end };
+  });
+  const tot = rows.reduce((a, r) => ({ mc: a.mc + r.mc, lb: a.lb + r.lb, total: a.total + r.total, eff: a.eff + r.eff, days: a.days + r.days }), { mc: 0, lb: 0, total: 0, eff: 0, days: 0 });
+
+  if (!rows.length) return <Panel title="Sheet — full plan" tag="04" className="mt-4"><Empty msg="Add parts with operations to see the full sheet." /></Panel>;
+
+  const Th = ({ children, r }) => <th className={`py-2 px-2.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-ink-dim ${r ? "text-right" : "text-left"} whitespace-nowrap`}>{children}</th>;
+  const Td = ({ children, r, b }) => <td className={`py-2 px-2.5 text-[12px] ${r ? "text-right font-mono tnum" : ""} ${b ? "font-bold text-ink" : "text-ink-soft"} whitespace-nowrap`}>{children}</td>;
+
+  return (
+    <Panel title="Sheet — full plan" tag="04" right={<span className="font-mono text-[11px] text-ink-dim">{machine.name} · {prettyMonth(curMonth())}</span>} className="mt-4">
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full min-w-[860px] border-collapse">
+          <thead><tr className="border-b border-hair-strong">
+            <Th>Description</Th><Th r>Opn</Th><Th r>Cy.s</Th><Th r>Set.s</Th><Th r>Ins.s</Th><Th r>Plan Qty</Th>
+            <Th r>MC Hrs</Th><Th r>LB Hrs</Th><Th r>Total</Th><Th r>Eff</Th><Th r>Days</Th><Th r>Start</Th><Th r>End</Th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className="border-b border-hair last:border-0 hover:bg-white/[0.02]">
+                <Td b>{r.name}</Td><Td r b>{r.op_no}</Td><Td r>{round1(r.cy)}</Td><Td r>{round1(r.set)}</Td><Td r>{round1(r.ins)}</Td><Td r b>{r.qty}</Td>
+                <Td r>{round2(r.mc)}</Td><Td r>{round2(r.lb)}</Td><Td r>{round2(r.total)}</Td><Td r>{round2(r.eff)}</Td>
+                <Td r b><span className="text-brand-300">{round2(r.days)}</span></Td>
+                <Td r>{fmtDate(r.start)}</Td><Td r>{fmtDate(r.end)}</Td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot><tr className="border-t-2 border-hair-strong">
+            <Td b>Total</Td><Td r /><Td r /><Td r /><Td r /><Td r /><Td r b>{round1(tot.mc)}</Td><Td r b>{round1(tot.lb)}</Td><Td r b>{round1(tot.total)}</Td><Td r b>{round1(tot.eff)}</Td><Td r b><span className="text-brand-300">{round1(tot.days)}</span></Td><Td r /><Td r />
+          </tr></tfoot>
+        </table>
+      </div>
+      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>This is your HMC&amp;VMC plan sheet, computed live from the parts, operations and quantities — same columns, same formulas. (Costing columns and the Actual section come in the next phases.)</span></div>
+    </Panel>
+  );
+}
+
 /* ------------------------ Machine Schedule (Phase 3) ---------------------- */
 // Auto start/end dates per operation (sequential, Sundays off) + a month
 // timeline, mirroring the Start Date / End Date columns in the sheets.
@@ -1378,6 +1429,9 @@ function MachineLoading({ data, reload }) {
 
       {/* Phase 3: auto schedule — operations sequenced with start/end dates */}
       <MachineSchedule machine={sel} lines={lines} operations={operations} components={components} />
+
+      {/* Excel replica — the full plan sheet */}
+      <MachineSheet machine={sel} lines={lines} operations={operations} components={components} />
 
       <ConfirmDialog open={!!delLine} title="Remove from machine plan?" body={delLine ? <>Remove <b className="text-ink">{compName(delLine.component_id)}</b> from {sel.name}'s plan?</> : null} confirmLabel="Remove" danger busy={delBusy} onConfirm={confirmDel} onClose={() => { if (!delBusy) setDelLine(null); }} />
     </>
