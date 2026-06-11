@@ -115,6 +115,12 @@ export const db = {
     await store.write("components", [...rows, row]);
     return row;
   },
+  async setComponentRate(id, rate) {
+    const comps = (await store.read("components")) || [];
+    const c = comps.find((x) => x.id === id);
+    if (c) { c.rate = Number(rate) || 0; await store.write("components", comps); }
+  },
+
   // ---- OPERATIONS (routing — Phase 1) · demo parity --------------------------
   async listOperations() {
     const ops = (await store.read("component_operations")) || [];

@@ -35,3 +35,19 @@ export function componentCapacity(operations, qty) {
 
 export const round1 = (n) => Math.round(Number(n) * 10) / 10 || 0;
 export const round2 = (n) => Math.round(Number(n) * 100) / 100 || 0;
+
+// ---- Costing (Phase 5) -----------------------------------------------------
+// Target hour-rate from the sheets (the KPI they push toward). Editable later.
+export const TARGET_HR = 2200; // ₹/hour
+export const MACHINE_RATE = 1200; // ₹/machine-hour (cost)
+
+// Per-part costing at a quantity, given its rate (₹/pc) and total hours.
+export function costing({ rate = 0, qty = 0, hours = 0, targetHr = TARGET_HR }) {
+  const amount = Number(rate) * Number(qty);
+  const hr = hours > 0 ? amount / hours : 0;
+  const targeted = targetHr * hours;
+  const loss = Math.max(0, targeted - amount);
+  return { amount, hr, targeted, loss };
+}
+
+export const inr = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");

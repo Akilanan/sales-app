@@ -97,6 +97,10 @@ export const db = {
     const { error } = await supabase.from("components").update({ active: false }).eq("id", id);
     if (error) throw error;
   },
+  async setComponentRate(id, rate) {
+    const { error } = await supabase.from("components").update({ rate: Number(rate) || 0 }).eq("id", id);
+    if (error) throw error;
+  },
 
   // ---- OPERATIONS (routing — Phase 1 of the planning module) ----------------
   async listOperations() {

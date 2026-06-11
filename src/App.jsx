@@ -15,7 +15,7 @@ import ScrollExpandMedia from "./components/ui/ScrollExpandMedia";
 import { LiquidButton, MetalButton } from "./components/ui/buttons";
 import { NavBar } from "./components/ui/tubelight-navbar";
 import { EtheralShadow } from "./components/ui/etheral-shadow";
-import { opHours, componentCapacity, round1, round2 } from "./lib/capacity";
+import { opHours, componentCapacity, round1, round2, costing, inr, TARGET_HR } from "./lib/capacity";
 import { scheduleMachine, monthBounds, fmtDate } from "./lib/schedule";
 
 // Login hero imagery (industrial). onError in ScrollExpandMedia falls back from
@@ -1209,6 +1209,117 @@ function TeamAdmin({ user }) {
   );
 }
 
+/* ----------------------------- Costing (Phase 5) -------------------------- */
+// The sheet's costing block: per part — Amount (rate×qty), Hour-Rate vs the
+// ₹2200 target, Targeted amount, Loss. Rolls up to the machine's overall HR.
+function MachineCosting({ machine, lines, operations, components, reload }) {
+  const opsByComp = {};
+  for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
+  const compOf = (id) => (components || []).find((c) => c.id === id) || {};
+  const setRate = async (id, v) => { try { await db.setComponentRate(id, parseFloat(v) || 0); await reload(); } catch { /* keep */ } };
+
+  if (!lines.length) return null;
+  let totAmount = 0, totHours = 0, totLoss = 0;
+  const rows = lines.map((l) => {
+    const c = compOf(l.component_id);
+    const cap = componentCapacity(opsByComp[l.component_id] || [], l.qty);
+    const cost = costing({ rate: c.rate || 0, qty: l.qty, hours: cap.total });
+    totAmount += cost.amount; totHours += cap.total; totLoss += cost.loss;
+    return { l, c, hours: cap.total, ...cost };
+  });
+  const machineHr = totHours > 0 ? totAmount / totHours : 0;
+  const hrTone = (hr) => hr >= TARGET_HR ? "text-ok-ink" : hr >= TARGET_HR * 0.8 ? "text-warn-ink" : "text-bad-ink";
+
+  return (
+    <Panel title="Costing" tag="05" right={<span className="font-mono text-[11px] text-ink-dim">target HR {inr(TARGET_HR)}/hr</span>} className="mt-4">
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-4">
+        <span className="text-ink-soft text-sm">Machine hour-rate:</span>
+        <span className={`font-mono text-2xl font-bold tnum ${hrTone(machineHr)}`}>{inr(machineHr)}<span className="text-ink-dim text-sm">/hr</span></span>
+        <span className="font-mono text-sm text-ink-soft">vs {inr(TARGET_HR)} target</span>
+        {totLoss > 0 && <span className="font-mono text-sm text-bad-ink">loss {inr(totLoss)}</span>}
+      </div>
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full min-w-[680px]">
+          <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.14em] border-b border-hair">
+            <th className="py-2.5 px-2">Part</th><th className="py-2.5 px-2 text-right">Qty</th><th className="py-2.5 px-2 text-right">Rate ₹/pc</th>
+            <th className="py-2.5 px-2 text-right">Amount</th><th className="py-2.5 px-2 text-right">Hours</th><th className="py-2.5 px-2 text-right">HR ₹/hr</th>
+            <th className="py-2.5 px-2 text-right">Targeted</th><th className="py-2.5 px-2 text-right">Loss</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.l.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025]">
+                <td className="py-2.5 px-2 font-semibold text-sm">{r.c.name}</td>
+                <td className="py-2.5 px-2 text-right font-mono tnum">{r.l.qty}</td>
+                <td className="py-2.5 px-2 text-right"><input type="number" min="0" defaultValue={r.c.rate || 0} onBlur={(e) => setRate(r.c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-24`} /></td>
+                <td className="py-2.5 px-2 text-right font-mono text-ink tnum">{inr(r.amount)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round1(r.hours)}</td>
+                <td className={`py-2.5 px-2 text-right font-mono font-bold tnum ${hrTone(r.hr)}`}>{inr(r.hr)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-ink-dim tnum">{inr(r.targeted)}</td>
+                <td className={`py-2.5 px-2 text-right font-mono tnum ${r.loss > 0 ? "text-bad-ink" : "text-ink-dim"}`}>{r.loss > 0 ? inr(r.loss) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Set each part's rate (₹ per piece). Amount = rate × qty; Hour-Rate = amount ÷ hours; Targeted = {inr(TARGET_HR)} × hours; Loss = shortfall vs target. Green hour-rate means you're at or above your ₹{TARGET_HR} target.</span></div>
+    </Panel>
+  );
+}
+
+/* --------------------- Plan vs Actual (Phase 4) --------------------------- */
+// The sheet's second "Actual" section: actual output (from shift entries) vs the
+// plan, per part on the machine — qty, days, % complete, scrap.
+function MachinePlanVsActual({ machine, lines, operations, components, entries }) {
+  const opsByComp = {};
+  for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
+  const nameOf = (id) => (components || []).find((c) => c.id === id)?.name || "?";
+  const actualFor = (cid) => (entries || []).filter((e) => e.component_id === cid && e.machine_id === machine.id)
+    .reduce((a, e) => ({ qty: a.qty + (e.quantity || 0), scrap: a.scrap + (e.scrap_qty || 0) }), { qty: 0, scrap: 0 });
+
+  if (!lines.length) return null;
+  return (
+    <Panel title="Plan vs Actual" tag="06" right={<span className="font-mono text-[11px] text-ink-dim">actuals from shift entries</span>} className="mt-4">
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full min-w-[640px]">
+          <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.14em] border-b border-hair">
+            <th className="py-2.5 px-2">Part</th>
+            <th className="py-2.5 px-2 text-right">Plan Qty</th><th className="py-2.5 px-2 text-right">Actual</th>
+            <th className="py-2.5 px-2 text-right">Plan Days</th><th className="py-2.5 px-2 text-right">Act Days</th>
+            <th className="py-2.5 px-2 text-right">Scrap</th><th className="py-2.5 px-2 w-40">Progress</th>
+          </tr></thead>
+          <tbody>
+            {lines.map((l) => {
+              const ops = opsByComp[l.component_id] || [];
+              const a = actualFor(l.component_id);
+              const planDays = componentCapacity(ops, l.qty).days;
+              const actDays = componentCapacity(ops, a.qty).days;
+              const pct = l.qty ? Math.round((a.qty / l.qty) * 100) : 0;
+              const tone = pct >= 100 ? "bg-ok text-ok-ink" : pct >= 60 ? "bg-warn text-warn-ink" : "bg-bad text-bad-ink";
+              return (
+                <tr key={l.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025]">
+                  <td className="py-2.5 px-2 font-semibold text-sm">{nameOf(l.component_id)}</td>
+                  <td className="py-2.5 px-2 text-right font-mono tnum">{l.qty}</td>
+                  <td className="py-2.5 px-2 text-right font-mono font-bold text-ink tnum">{a.qty}</td>
+                  <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round1(planDays)}</td>
+                  <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round1(actDays)}</td>
+                  <td className="py-2.5 px-2 text-right font-mono text-ink-dim tnum">{a.scrap || "—"}</td>
+                  <td className="py-2.5 px-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-2 rounded-full bg-over overflow-hidden"><div className={`h-full ${tone.split(" ")[0]}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
+                      <span className={`font-mono text-xs font-bold tnum ${tone.split(" ")[1]}`}>{pct}%</span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Actual quantities come from operators' Shift Entry logs against this machine. Days recompute from the actual quantity using the same operation formulas.</span></div>
+    </Panel>
+  );
+}
+
 /* ------------------- Sheet view — the Excel replica ----------------------- */
 // A full per-machine table that mirrors the HMC&VMC sheet columns end-to-end:
 // Description, Opn, Cy/Set/Ins time, Plan Qty, MC/LB/Total/Eff hours, Total
@@ -1227,13 +1338,32 @@ function MachineSheet({ machine, lines, operations, components }) {
   });
   const tot = rows.reduce((a, r) => ({ mc: a.mc + r.mc, lb: a.lb + r.lb, total: a.total + r.total, eff: a.eff + r.eff, days: a.days + r.days }), { mc: 0, lb: 0, total: 0, eff: 0, days: 0 });
 
+  // Phase 6: export this machine's sheet to a CSV (opens directly in Excel).
+  const exportCsv = () => {
+    const head = ["Description", "Opn", "Cycle(s)", "Setup(s)", "Ins(s)", "Plan Qty", "MC Hrs", "LB Hrs", "Total Hrs", "Eff Hrs", "Days", "Start", "End"];
+    const body = rows.map((r) => [r.name, r.op_no, r.cy, r.set, r.ins, r.qty, round2(r.mc), round2(r.lb), round2(r.total), round2(r.eff), round2(r.days), fmtDate(r.start), fmtDate(r.end)]);
+    body.push(["Total", "", "", "", "", "", round1(tot.mc), round1(tot.lb), round1(tot.total), round1(tot.eff), round1(tot.days), "", ""]);
+    const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const csv = [["Machine", machine.name], ["Month", prettyMonth(curMonth())], [], head, ...body].map((row) => row.map(esc).join(",")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `${machine.name.replace(/\s+/g, "_")}-${curMonth()}-plan.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (!rows.length) return <Panel title="Sheet — full plan" tag="04" className="mt-4"><Empty msg="Add parts with operations to see the full sheet." /></Panel>;
 
   const Th = ({ children, r }) => <th className={`py-2 px-2.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-ink-dim ${r ? "text-right" : "text-left"} whitespace-nowrap`}>{children}</th>;
   const Td = ({ children, r, b }) => <td className={`py-2 px-2.5 text-[12px] ${r ? "text-right font-mono tnum" : ""} ${b ? "font-bold text-ink" : "text-ink-soft"} whitespace-nowrap`}>{children}</td>;
 
   return (
-    <Panel title="Sheet — full plan" tag="04" right={<span className="font-mono text-[11px] text-ink-dim">{machine.name} · {prettyMonth(curMonth())}</span>} className="mt-4">
+    <Panel title="Sheet — full plan" tag="04" right={
+      <div className="flex items-center gap-3">
+        <span className="hidden sm:inline font-mono text-[11px] text-ink-dim">{machine.name} · {prettyMonth(curMonth())}</span>
+        <button onClick={exportCsv} className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition"><Copy size={13} /> Export Excel</button>
+      </div>
+    } className="mt-4">
       <div className="overflow-x-auto -mx-1">
         <table className="w-full min-w-[860px] border-collapse">
           <thead><tr className="border-b border-hair-strong">
@@ -1432,6 +1562,12 @@ function MachineLoading({ data, reload }) {
 
       {/* Excel replica — the full plan sheet */}
       <MachineSheet machine={sel} lines={lines} operations={operations} components={components} />
+
+      {/* Phase 5: costing (hour-rate vs target) */}
+      <MachineCosting machine={sel} lines={lines} operations={operations} components={components} reload={reload} />
+
+      {/* Phase 4: plan vs actual (the sheet's Actual section) */}
+      <MachinePlanVsActual machine={sel} lines={lines} operations={operations} components={components} entries={data.entries} />
 
       <ConfirmDialog open={!!delLine} title="Remove from machine plan?" body={delLine ? <>Remove <b className="text-ink">{compName(delLine.component_id)}</b> from {sel.name}'s plan?</> : null} confirmLabel="Remove" danger busy={delBusy} onConfirm={confirmDel} onClose={() => { if (!delBusy) setDelLine(null); }} />
     </>
