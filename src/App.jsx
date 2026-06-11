@@ -852,15 +852,20 @@ function Dashboard({ data, live }) {
 
       {/* Planning summary — surfaces the Loading-screen data on the dashboard */}
       {(() => {
-        const { machines = [], operations = [], machinePlan = [], components = [], settings = {} } = data;
-        if (!machinePlan.length) return null; // nothing assigned to machines yet
-        const targetHr = Number(settings.target_hr) || 2200;
+        const { machines = [], operations = [], machinePlan = [], components = [], settings = {}, entries: ents = [] } = data;
         const activeM = machines.filter((m) => m.active !== false);
-        const planned = activeM.filter((m) => machinePlan.some((l) => l.machine_id === m.id));
-        const loads = planned.map((m) => { const d = machineLoadDays(m.id, machinePlan, operations); const cap = (m.working_days || 24) * ((m.shifts || 3) / 3); return { m, d, cap, pct: cap ? Math.round((d / cap) * 100) : 0 }; });
-        const overbooked = loads.filter((x) => x.pct > 100).length;
-        const avgPct = loads.length ? Math.round(loads.reduce((a, x) => a + x.pct, 0) / loads.length) : 0;
+        if (!activeM.length) return null;
+        const targetHr = Number(settings.target_hr) || 2200;
         const opsByComp = {}; for (const o of operations) (opsByComp[o.component_id] ||= []).push(o);
+        const outFor = (mid) => ents.filter((e) => e.machine_id === mid).reduce((s, e) => s + (e.quantity || 0), 0);
+        const fleet = activeM.map((m) => {
+          const d = machineLoadDays(m.id, machinePlan, operations);
+          const cap = (m.working_days || 24) * ((m.shifts || 3) / 3);
+          return { m, d, cap, pct: cap ? Math.round((d / cap) * 100) : 0, out: outFor(m.id), planned: machinePlan.some((l) => l.machine_id === m.id) };
+        }).sort((a, b) => b.pct - a.pct || b.out - a.out);
+        const planned = fleet.filter((f) => f.planned);
+        const overbooked = fleet.filter((f) => f.pct > 100).length;
+        const avgPct = planned.length ? Math.round(planned.reduce((a, x) => a + x.pct, 0) / planned.length) : 0;
         let amt = 0, hrs = 0;
         for (const l of machinePlan) { const c = components.find((x) => x.id === l.component_id) || {}; const cap = componentCapacity(opsByComp[l.component_id] || [], l.qty); amt += (c.rate || 0) * l.qty; hrs += cap.total; }
         const hr = hrs > 0 ? amt / hrs : 0;
@@ -872,13 +877,29 @@ function Dashboard({ data, live }) {
           </div>
         );
         return (
-          <Panel title="Capacity & Costing" tag="05" right={<span className="font-mono text-[11px] text-ink-dim">from the planning module</span>} className="mt-5">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Panel title="Machine Fleet" tag="05" right={<span className="font-mono text-[11px] text-ink-dim">load + output, all machines</span>} className="mt-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               <Card label="Machines planned" value={`${planned.length} / ${activeM.length}`} />
               <Card label="Avg machine load" value={`${avgPct}%`} tone={avgPct > 100 ? "bad" : "ok"} />
               <Card label="Overbooked" value={overbooked} tone={overbooked > 0 ? "bad" : "ok"} />
-              <Card label="Hour-rate" value={inr(hr)} sub={`vs ${inr(targetHr)} target`} tone={hr >= targetHr ? "ok" : "bad"} />
+              <Card label="Hour-rate" value={inr(hr)} sub={`vs ${inr(targetHr)} target`} tone={hr >= targetHr ? "ok" : hr > 0 ? "bad" : undefined} />
             </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+              {fleet.map((f) => {
+                const bar = f.pct > 100 ? "bg-bad" : f.pct >= 85 ? "bg-warn" : f.planned ? "bg-ok" : "bg-over";
+                return (
+                  <div key={f.m.id} className="rounded-lg bg-inset/40 border border-hair p-2.5">
+                    <div className="font-semibold text-[12px] text-ink truncate">{f.m.name}</div>
+                    <div className="flex items-baseline justify-between mt-1">
+                      <span className={`font-mono text-[11px] ${f.pct > 100 ? "text-bad-ink" : "text-ink-dim"}`}>{f.planned ? `${f.pct}%` : "idle"}</span>
+                      <span className="font-mono text-[11px] text-ink-soft">{f.out} pcs</span>
+                    </div>
+                    <div className="mt-1 h-1 rounded-full bg-over overflow-hidden"><div className={`h-full ${bar}`} style={{ width: `${Math.min(f.pct, 100)}%` }} /></div>
+                  </div>
+                );
+              })}
+            </div>
+            {!machinePlan.length && <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Assign parts to machines in the Loading tab to see load %, capacity, and hour-rate fill in here. Output (pcs) shows live as operators log production.</span></div>}
           </Panel>
         );
       })()}
