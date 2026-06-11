@@ -34,20 +34,40 @@ function getSecretKey(): string | null {
   return Deno.env.get("ADMIN_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || null;
 }
 
-const cors = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+// CORS locked to the production origin (overridable via ALLOWED_ORIGINS).
+const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ||
+  "https://prana-production-app.12akilan2007.workers.dev")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") || "";
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    "Access-Control-Allow-Origin": allow,
+    "Vary": "Origin",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+  };
+}
+
+// Unbiased integer in [0, maxExclusive) from the CSPRNG (rejection sampling).
+function randInt(maxExclusive: number): number {
+  const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
+  const buf = new Uint32Array(1);
+  let x: number;
+  do { crypto.getRandomValues(buf); x = buf[0]; } while (x >= limit);
+  return x % maxExclusive;
+}
 
 // Strong password — excludes ambiguous chars (0/O, 1/l/I) for readable printouts.
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#%+=";
 const strongPassword = (len = 14) =>
-  Array.from({ length: len }, () => ALPHA[Math.floor(Math.random() * ALPHA.length)]).join("");
+  Array.from({ length: len }, () => ALPHA[randInt(ALPHA.length)]).join("");
 
 Deno.serve(async (req: Request) => {
+  const cors = corsHeaders(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
@@ -93,12 +113,13 @@ Deno.serve(async (req: Request) => {
       const name = String(body?.name || "").trim();
       if (name.length < 2) return json({ error: "Name is required" }, 400);
 
-      // unique 4-digit PIN (avoid collisions with existing login_codes)
+      // unique 6-digit PIN from the CSPRNG (100000-999999 = 900k space, vs the
+      // old 4-digit 9k that was brute-forceable; avoid existing login_codes).
       const { data: existing } = await admin.from("users").select("login_code");
       const taken = new Set((existing || []).map((r: any) => String(r.login_code || "")));
       let pin = "";
       for (let i = 0; i < 200; i++) {
-        const cand = String(Math.floor(1000 + Math.random() * 9000)); // 1000-9999
+        const cand = String(100000 + randInt(900000)); // 100000-999999
         if (!taken.has(cand)) { pin = cand; break; }
       }
       if (!pin) return json({ error: "Could not allocate a free PIN" }, 409);
@@ -154,6 +175,9 @@ Deno.serve(async (req: Request) => {
 
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
-    return json({ error: String((e as Error)?.message || e) }, 500);
+    // Log the real cause server-side (Workers/Edge logs); never leak DB/internal
+    // exception text to the browser.
+    console.error("admin-users error:", action, String((e as Error)?.message || e));
+    return json({ error: "Something went wrong. Please try again." }, 500);
   }
 });

@@ -17,11 +17,14 @@ export function NavBar({ items, className, activeTab: controlledTab, onItemClick
   return (
     <div
       className={cn(
-        "fixed bottom-0 sm:top-0 sm:bottom-auto left-1/2 -translate-x-1/2 z-50 mb-6 sm:mb-0 sm:pt-6",
+        // Mobile: a full-width bottom bar (thumb-reach, big tap targets).
+        // sm+: the floating tubelight pill, top-center.
+        "fixed z-50 left-2 right-2 bottom-2 sm:left-1/2 sm:right-auto sm:bottom-auto sm:top-0 sm:-translate-x-1/2 sm:pt-6",
+        "pb-[env(safe-area-inset-bottom)] sm:pb-0",
         className,
       )}
     >
-      <div className="flex items-center gap-3 bg-white/5 border border-hair backdrop-blur-lg py-1 px-1 rounded-full shadow-lg">
+      <div className="flex items-stretch sm:items-center justify-around sm:justify-center gap-1 sm:gap-3 bg-base/85 sm:bg-white/5 border border-hair backdrop-blur-lg py-1 px-1 rounded-2xl sm:rounded-full shadow-lg">
         {items.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.name;
@@ -37,15 +40,16 @@ export function NavBar({ items, className, activeTab: controlledTab, onItemClick
                 if (onItemClick) onItemClick(item);
               }}
               className={cn(
-                "relative cursor-pointer text-sm font-semibold px-6 py-2 rounded-full transition-colors",
+                "relative cursor-pointer font-semibold rounded-xl sm:rounded-full transition-colors",
+                // Mobile: icon+label stacked, ≥52px tall, share width evenly.
+                "flex-1 sm:flex-none flex flex-col sm:flex-row items-center justify-center gap-0.5 min-h-[52px] sm:min-h-0 px-1 sm:px-6 py-1.5 sm:py-2 text-[10px] sm:text-sm",
                 "text-ink-soft hover:text-ink",
                 isActive && "bg-white/[0.08] text-ink",
               )}
             >
-              <span className="hidden md:inline">{item.name}</span>
-              <span className="md:hidden">
-                <Icon size={18} weight={isActive ? "fill" : "bold"} />
-              </span>
+              <Icon size={19} weight={isActive ? "fill" : "bold"} className="sm:hidden" />
+              <span className="sm:hidden leading-none">{item.name}</span>
+              <span className="hidden sm:inline">{item.name}</span>
               {isActive && (
                 <m.div
                   layoutId="lamp"

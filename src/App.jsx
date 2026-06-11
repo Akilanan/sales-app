@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { m, AnimatePresence, useMotionValue, useTransform, useSpring, animate } from "framer-motion";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -203,7 +203,10 @@ function SplitReveal({ lines, className = "" }) {
 function StatusPill({ level, label, size = "md" }) {
   const s = STATUS[level];
   const p = size === "lg" ? "px-3 py-1.5 text-sm" : "px-2.5 py-1 text-[12px]";
-  return <span className={`inline-flex items-center rounded-[6px] font-semibold ${p} ${s.soft} ${s.text}`}>{label || s.label}</span>;
+  // Grayscale "brightness = urgency": Critical gets a bright ring so it pops at a
+  // glance (the one state that must grab attention), without adding any colour.
+  const emphasis = level === "bad" ? "ring-1 ring-white/35 shadow-[0_0_12px_-2px_rgba(255,255,255,0.25)]" : "";
+  return <span className={`inline-flex items-center rounded-[6px] font-semibold ${p} ${s.soft} ${s.text} ${emphasis}`}>{label || s.label}</span>;
 }
 
 // Signed variance vs target — the magnitude behind the status word (±units · ±%).
@@ -319,15 +322,6 @@ export default function App() {
   const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [], settings: {} });
   const [live, setLive] = useState(false); // realtime connection state (supabase mode)
 
-  const appStatus = useMemo(() => {
-    const totalMonthly = data.plans.reduce((s, p) => s + p.target_qty, 0);
-    const dailyTargetTotal = data.plans.reduce((s, p) => s + p.target_qty / p.working_days, 0);
-    const actualMonthly = data.entries.reduce((s, e) => s + e.quantity, 0);
-    const expectedSoFar = Math.min(dailyTargetTotal * new Date().getDate(), totalMonthly);
-    const pace = expectedSoFar ? actualMonthly / expectedSoFar : 1;
-    return pace >= 0.97 ? "ok" : pace >= 0.85 ? "warn" : "bad";
-  }, [data]);
-
   useEffect(() => { (async () => { if (CONFIG_ERROR) { setBooting(false); return; } await seedIfEmpty(); setBooting(false); })(); }, []);
 
   const loadData = useCallback(async () => {
@@ -395,7 +389,7 @@ export default function App() {
           <NavBar items={navTabs} activeTab={activeTabName} onItemClick={(t) => setView(t.id)} />
           {/* Slim fixed header: wordmark left (layoutId flight target from the
               login lockup) + live status, user, logout right. */}
-          <header className="fixed top-0 inset-x-0 z-40 h-16 px-4 sm:px-6 flex items-center justify-between pointer-events-none bg-gradient-to-b from-base via-base/75 to-transparent">
+          <header className="fixed top-0 inset-x-0 z-40 h-16 px-4 sm:px-6 flex items-center justify-between pointer-events-none bg-base/80 backdrop-blur-md border-b border-hair/60">
             <div className="pointer-events-auto"><Wordmark /></div>
             <div className="pointer-events-auto flex items-center gap-3">
               {live && (
@@ -408,7 +402,7 @@ export default function App() {
               <button onClick={logout} title="Log out" aria-label="Log out" className="p-2.5 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-ink transition shrink-0"><LogOut size={18} /></button>
             </div>
           </header>
-          <div className="pt-20 pb-24 sm:pb-0">
+          <div className="pt-20 pb-28 sm:pb-0">
             <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
               <AnimatePresence mode="wait">
                 <m.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
@@ -1195,7 +1189,7 @@ function TeamAdmin({ user }) {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Panel title="Add Operator" tag="01">
-            <p className="text-ink-soft text-sm mb-4 -mt-1">Operators log in with a PIN. Just enter the name — a unique 4-digit PIN is generated.</p>
+            <p className="text-ink-soft text-sm mb-4 -mt-1">Operators log in with a PIN. Just enter the name — a unique 6-digit PIN is generated.</p>
             <label className={labelCls} htmlFor="op-name">Operator name</label>
             <input id="op-name" value={opName} onChange={(e) => { setOpName(e.target.value); setErr(""); }} onKeyDown={(e) => e.key === "Enter" && addOperator()} placeholder="e.g. Ravi Kumar" className={`${inputCls} mb-4`} />
             <MetalButton onClick={addOperator} disabled={!opName.trim() || opBusy} fullWidth className="disabled:opacity-50 disabled:pointer-events-none">{opBusy ? "Adding…" : <><Plus size={18} /> Add Operator</>}</MetalButton>

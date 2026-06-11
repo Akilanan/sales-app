@@ -21,7 +21,9 @@ export default {
         over: "#2D2D30", // surface-4 overlays: modal / dropdown
         hair: "rgba(255,255,255,0.08)",
         "hair-strong": "rgba(255,255,255,0.18)",
-        ink: { DEFAULT: "#FAFAFA", soft: "#A1A1AA", dim: "#71717A" },
+        // dim lifted #71717A→#8A8A94 so the dimmest small text clears WCAG AA
+        // (~4.09:1 → ~5:1 on panels) without breaking the monochrome scale.
+        ink: { DEFAULT: "#FAFAFA", soft: "#A1A1AA", dim: "#8A8A94" },
         // MONOCHROME accent — silver/white scale (active states = white/silver tint;
         // primary buttons = silver-metal gradient with DARK text).
         brand: { 200: "#FAFAFA", 300: "#F4F4F5", 400: "#E4E4E7", 500: "#D4D4D8", 600: "#A1A1AA", 700: "#71717A" },

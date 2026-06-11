@@ -75,9 +75,11 @@ const colorVariants = {
   default: {
     outer: "bg-gradient-to-b from-[#000] to-[#A0A0A0]",
     inner: "bg-gradient-to-b from-[#FAFAFA] via-[#3E3E3E] to-[#E5E5E5]",
-    button: "bg-gradient-to-b from-[#B9B9B9] to-[#969696]",
-    textColor: "text-white",
-    textShadow: "[text-shadow:_0_-1px_0_rgb(80_80_80_/_100%)]",
+    // Brighter brushed silver + DARK engraved label = premium and clearly
+    // readable (~9:1), vs the old white-on-silver (~2:1).
+    button: "bg-gradient-to-b from-[#EDEDED] to-[#B6B6B6]",
+    textColor: "text-zinc-900",
+    textShadow: "[text-shadow:_0_1px_0_rgb(255_255_255_/_55%)]",
   },
   success: {
     outer: "bg-gradient-to-b from-[#005A43] to-[#7CCB9B]",
