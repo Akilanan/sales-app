@@ -316,7 +316,7 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
   const [view, setView] = useState("dashboard");
-  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [] });
+  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [], settings: {} });
   const [live, setLive] = useState(false); // realtime connection state (supabase mode)
 
   const appStatus = useMemo(() => {
@@ -332,8 +332,8 @@ export default function App() {
 
   const loadData = useCallback(async () => {
     const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
-    const [plans, entries, operations, machinePlan] = await Promise.all([db.getPlans(curMonth()), db.listEntries({ month: curMonth() }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(curMonth()) : Promise.resolve([])]);
-    setData({ components, machines, plans, entries, operations, machinePlan });
+    const [plans, entries, operations, machinePlan, settings] = await Promise.all([db.getPlans(curMonth()), db.listEntries({ month: curMonth() }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(curMonth()) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({})]);
+    setData({ components, machines, plans, entries, operations, machinePlan, settings });
   }, []);
 
   const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); await loadData(); };
@@ -849,6 +849,39 @@ function Dashboard({ data, live }) {
           )}
         </Panel>
       </div>
+
+      {/* Planning summary — surfaces the Loading-screen data on the dashboard */}
+      {(() => {
+        const { machines = [], operations = [], machinePlan = [], components = [], settings = {} } = data;
+        if (!machinePlan.length) return null; // nothing assigned to machines yet
+        const targetHr = Number(settings.target_hr) || 2200;
+        const activeM = machines.filter((m) => m.active !== false);
+        const planned = activeM.filter((m) => machinePlan.some((l) => l.machine_id === m.id));
+        const loads = planned.map((m) => { const d = machineLoadDays(m.id, machinePlan, operations); const cap = m.working_days || 24; return { m, d, cap, pct: Math.round((d / cap) * 100) }; });
+        const overbooked = loads.filter((x) => x.pct > 100).length;
+        const avgPct = loads.length ? Math.round(loads.reduce((a, x) => a + x.pct, 0) / loads.length) : 0;
+        const opsByComp = {}; for (const o of operations) (opsByComp[o.component_id] ||= []).push(o);
+        let amt = 0, hrs = 0;
+        for (const l of machinePlan) { const c = components.find((x) => x.id === l.component_id) || {}; const cap = componentCapacity(opsByComp[l.component_id] || [], l.qty); amt += (c.rate || 0) * l.qty; hrs += cap.total; }
+        const hr = hrs > 0 ? amt / hrs : 0;
+        const Card = ({ label, value, sub, tone }) => (
+          <div className="rounded-lg bg-inset/50 border border-hair p-3.5">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim mb-1.5">{label}</div>
+            <div className={`font-mono text-2xl font-bold tnum ${tone === "bad" ? "text-bad-ink" : tone === "ok" ? "text-ok-ink" : "text-ink"}`}>{value}</div>
+            {sub && <div className="text-ink-dim text-[11px] font-mono mt-0.5">{sub}</div>}
+          </div>
+        );
+        return (
+          <Panel title="Capacity & Costing" tag="05" right={<span className="font-mono text-[11px] text-ink-dim">from the planning module</span>} className="mt-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Card label="Machines planned" value={`${planned.length} / ${activeM.length}`} />
+              <Card label="Avg machine load" value={`${avgPct}%`} tone={avgPct > 100 ? "bad" : "ok"} />
+              <Card label="Overbooked" value={overbooked} tone={overbooked > 0 ? "bad" : "ok"} />
+              <Card label="Hour-rate" value={inr(hr)} sub={`vs ${inr(targetHr)} target`} tone={hr >= targetHr ? "ok" : "bad"} />
+            </div>
+          </Panel>
+        );
+      })()}
     </>
   );
 }
@@ -1212,7 +1245,7 @@ function TeamAdmin({ user }) {
 /* ----------------------------- Costing (Phase 5) -------------------------- */
 // The sheet's costing block: per part — Amount (rate×qty), Hour-Rate vs the
 // ₹2200 target, Targeted amount, Loss. Rolls up to the machine's overall HR.
-function MachineCosting({ machine, lines, operations, components, reload }) {
+function MachineCosting({ machine, lines, operations, components, reload, targetHr = TARGET_HR }) {
   const opsByComp = {};
   for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
   const compOf = (id) => (components || []).find((c) => c.id === id) || {};
@@ -1223,19 +1256,19 @@ function MachineCosting({ machine, lines, operations, components, reload }) {
   const rows = lines.map((l) => {
     const c = compOf(l.component_id);
     const cap = componentCapacity(opsByComp[l.component_id] || [], l.qty);
-    const cost = costing({ rate: c.rate || 0, qty: l.qty, hours: cap.total });
+    const cost = costing({ rate: c.rate || 0, qty: l.qty, hours: cap.total, targetHr });
     totAmount += cost.amount; totHours += cap.total; totLoss += cost.loss;
     return { l, c, hours: cap.total, ...cost };
   });
   const machineHr = totHours > 0 ? totAmount / totHours : 0;
-  const hrTone = (hr) => hr >= TARGET_HR ? "text-ok-ink" : hr >= TARGET_HR * 0.8 ? "text-warn-ink" : "text-bad-ink";
+  const hrTone = (hr) => hr >= targetHr ? "text-ok-ink" : hr >= targetHr * 0.8 ? "text-warn-ink" : "text-bad-ink";
 
   return (
-    <Panel title="Costing" tag="05" right={<span className="font-mono text-[11px] text-ink-dim">target HR {inr(TARGET_HR)}/hr</span>} className="mt-4">
+    <Panel title="Costing" tag="05" right={<span className="font-mono text-[11px] text-ink-dim">target HR {inr(targetHr)}/hr</span>} className="mt-4">
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-4">
         <span className="text-ink-soft text-sm">Machine hour-rate:</span>
         <span className={`font-mono text-2xl font-bold tnum ${hrTone(machineHr)}`}>{inr(machineHr)}<span className="text-ink-dim text-sm">/hr</span></span>
-        <span className="font-mono text-sm text-ink-soft">vs {inr(TARGET_HR)} target</span>
+        <span className="font-mono text-sm text-ink-soft">vs {inr(targetHr)} target</span>
         {totLoss > 0 && <span className="font-mono text-sm text-bad-ink">loss {inr(totLoss)}</span>}
       </div>
       <div className="overflow-x-auto -mx-1">
@@ -1261,7 +1294,7 @@ function MachineCosting({ machine, lines, operations, components, reload }) {
           </tbody>
         </table>
       </div>
-      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Set each part's rate (₹ per piece). Amount = rate × qty; Hour-Rate = amount ÷ hours; Targeted = {inr(TARGET_HR)} × hours; Loss = shortfall vs target. Green hour-rate means you're at or above your ₹{TARGET_HR} target.</span></div>
+      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Set each part's rate (₹ per piece). Amount = rate × qty; Hour-Rate = amount ÷ hours; Targeted = {inr(targetHr)} × hours; Loss = shortfall vs target. Green hour-rate means you're at or above your {inr(targetHr)} target.</span></div>
     </Panel>
   );
 }
@@ -1468,9 +1501,11 @@ function MachineLoading({ data, reload }) {
 
   if (!active.length) return <><PageHead title="Machine Loading" sub="Assign parts to machines and see capacity" /><div className="mt-6"><Empty msg="No machines yet. Seed your machines first." /></div></>;
 
+  const wd = (m) => (m && m.working_days) || MACHINE_DAYS;
   const lines = (machinePlan || []).filter((l) => l.machine_id === sel.id);
   const selDays = machineLoadDays(sel.id, machinePlan, operations);
-  const selPct = Math.round((selDays / MACHINE_DAYS) * 100);
+  const selCap = wd(sel);
+  const selPct = Math.round((selDays / selCap) * 100);
   const compName = (id) => components.find((c) => c.id === id)?.name || "?";
   const compOps = (id) => (operations || []).filter((o) => o.component_id === id);
 
@@ -1491,14 +1526,15 @@ function MachineLoading({ data, reload }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
           {active.map((m) => {
             const d = machineLoadDays(m.id, machinePlan, operations);
-            const pct = Math.round((d / MACHINE_DAYS) * 100);
+            const cap = wd(m);
+            const pct = Math.round((d / cap) * 100);
             const tone = loadTone(pct);
             return (
               <button key={m.id} onClick={() => setSelId(m.id)} className={`text-left rounded-lg border ${m.id === sel.id ? "border-brand-500 bg-brand-500/[0.06]" : tone.ring + " bg-inset/50 hover:border-brand-500/40"} p-3 transition`}>
                 <div className="font-semibold text-[13px] text-ink truncate">{m.name}</div>
-                <div className="mt-1.5 flex items-baseline gap-1"><span className={`font-mono font-bold tnum ${tone.text}`}>{round1(d)}</span><span className="font-mono text-[11px] text-ink-dim">/ {MACHINE_DAYS}d</span></div>
+                <div className="mt-1.5 flex items-baseline gap-1"><span className={`font-mono font-bold tnum ${tone.text}`}>{round1(d)}</span><span className="font-mono text-[11px] text-ink-dim">/ {cap}d</span></div>
                 <div className="mt-1.5 h-1.5 rounded-full bg-over overflow-hidden"><div className={`h-full ${tone.bar}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
-                {pct > 100 && <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-bad-ink">over by {round1(d - MACHINE_DAYS)}d</div>}
+                {pct > 100 && <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-bad-ink">over by {round1(d - cap)}d</div>}
               </button>
             );
           })}
@@ -1513,7 +1549,7 @@ function MachineLoading({ data, reload }) {
       }>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
           <span className="text-ink-soft text-sm">Total load:</span>
-          <span className={`font-mono text-2xl font-bold tnum ${loadTone(selPct).text}`}>{round1(selDays)}<span className="text-ink-dim text-base"> / {MACHINE_DAYS} days</span></span>
+          <span className={`font-mono text-2xl font-bold tnum ${loadTone(selPct).text}`}>{round1(selDays)}<span className="text-ink-dim text-base"> / {selCap} days</span></span>
           <div className="flex-1 min-w-[120px] max-w-[280px] h-2 rounded-full bg-over overflow-hidden"><div className={`h-full ${loadTone(selPct).bar}`} style={{ width: `${Math.min(selPct, 100)}%` }} /></div>
           <span className={`font-mono text-sm font-bold ${loadTone(selPct).text}`}>{selPct}%</span>
         </div>
@@ -1564,13 +1600,54 @@ function MachineLoading({ data, reload }) {
       <MachineSheet machine={sel} lines={lines} operations={operations} components={components} />
 
       {/* Phase 5: costing (hour-rate vs target) */}
-      <MachineCosting machine={sel} lines={lines} operations={operations} components={components} reload={reload} />
+      <MachineCosting machine={sel} lines={lines} operations={operations} components={components} reload={reload} targetHr={Number(data.settings?.target_hr) || TARGET_HR} />
 
       {/* Phase 4: plan vs actual (the sheet's Actual section) */}
       <MachinePlanVsActual machine={sel} lines={lines} operations={operations} components={components} entries={data.entries} />
 
       <ConfirmDialog open={!!delLine} title="Remove from machine plan?" body={delLine ? <>Remove <b className="text-ink">{compName(delLine.component_id)}</b> from {sel.name}'s plan?</> : null} confirmLabel="Remove" danger busy={delBusy} onConfirm={confirmDel} onClose={() => { if (!delBusy) setDelLine(null); }} />
     </>
+  );
+}
+
+// Editable settings: target hour-rate + per-machine working days / shifts.
+function SettingsPanel({ data, reload }) {
+  const machines = (data.machines || []).filter((m) => m.active !== false);
+  const [hr, setHr] = useState(String(data.settings?.target_hr || "2200"));
+  const [saved, setSaved] = useState(false);
+  const saveHr = async () => { try { await db.setSetting("target_hr", parseInt(hr, 10) || 2200); setSaved(true); setTimeout(() => setSaved(false), 1500); await reload(); } catch { /* keep */ } };
+  const saveMachine = async (id, field, v) => { try { await db.setMachine(id, { [field]: Math.max(field === "shifts" ? 1 : 1, parseInt(v, 10) || 1) }); await reload(); } catch { /* keep */ } };
+
+  return (
+    <Panel title="Settings — capacity & costing" tag="05" className="mt-4">
+      <div className="max-w-sm mb-6">
+        <label className={labelCls}>Target hour-rate (₹/hr)</label>
+        <div className="flex gap-2">
+          <input type="number" min="0" value={hr} onChange={(e) => setHr(e.target.value)} className={inputCls} />
+          <MetalButton onClick={saveHr} className="shrink-0">{saved ? <><Check size={16} /> Saved</> : "Save"}</MetalButton>
+        </div>
+        <p className="text-ink-dim text-xs mt-1.5">Your hour-rate goal — the Costing screen colours each part green at or above it.</p>
+      </div>
+
+      <label className={labelCls}>Per-machine working days &amp; shifts</label>
+      <div className="overflow-x-auto -mx-1 mt-1">
+        <table className="w-full min-w-[420px]">
+          <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.14em] border-b border-hair">
+            <th className="py-2.5 px-2">Machine</th><th className="py-2.5 px-2 text-right">Working days</th><th className="py-2.5 px-2 text-right">Shifts</th>
+          </tr></thead>
+          <tbody>
+            {machines.map((m) => (
+              <tr key={m.id} className="border-b border-hair last:border-0">
+                <td className="py-2 px-2 font-semibold text-sm">{m.name}</td>
+                <td className="py-2 px-2 text-right"><input type="number" min="1" defaultValue={m.working_days || 24} onBlur={(e) => saveMachine(m.id, "working_days", e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-20`} /></td>
+                <td className="py-2 px-2 text-right"><input type="number" min="1" max="3" defaultValue={m.shifts || 3} onBlur={(e) => saveMachine(m.id, "shifts", e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-16`} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Working days set each machine's monthly capacity on the Loading screen (default 24, Sundays off). Edit a value and click away to save.</span></div>
+    </Panel>
   );
 }
 
@@ -1754,6 +1831,7 @@ function PlanSetup({ data, reload }) {
       </Panel>
 
       <div className="mt-4"><OperationsPanel data={data} reload={reload} /></div>
+      <SettingsPanel data={data} reload={reload} />
 
       <ConfirmDialog
         open={!!delComp}

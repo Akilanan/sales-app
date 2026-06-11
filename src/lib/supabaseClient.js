@@ -102,6 +102,21 @@ export const db = {
     if (error) throw error;
   },
 
+  // ---- SETTINGS + machine capacity (editable) -------------------------------
+  async getSettings() {
+    const { data, error } = await supabase.from("app_settings").select("*");
+    if (error) throw error;
+    return Object.fromEntries((data || []).map((r) => [r.key, r.value]));
+  },
+  async setSetting(key, value) {
+    const { error } = await supabase.from("app_settings").upsert({ key, value: String(value) });
+    if (error) throw error;
+  },
+  async setMachine(id, fields) {
+    const { error } = await supabase.from("machines").update(fields).eq("id", id);
+    if (error) throw error;
+  },
+
   // ---- OPERATIONS (routing — Phase 1 of the planning module) ----------------
   async listOperations() {
     const { data, error } = await supabase

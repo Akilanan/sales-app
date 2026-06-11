@@ -121,6 +121,21 @@ export const db = {
     if (c) { c.rate = Number(rate) || 0; await store.write("components", comps); }
   },
 
+  // ---- SETTINGS + machine capacity (editable) · demo parity ------------------
+  async getSettings() {
+    const s = (await store.read("app_settings")) || {};
+    return { target_hr: "2200", ...s };
+  },
+  async setSetting(key, value) {
+    const s = (await store.read("app_settings")) || {};
+    s[key] = String(value); await store.write("app_settings", s);
+  },
+  async setMachine(id, fields) {
+    const ms = (await store.read("machines")) || [];
+    const m = ms.find((x) => x.id === id);
+    if (m) { Object.assign(m, fields); await store.write("machines", ms); }
+  },
+
   // ---- OPERATIONS (routing — Phase 1) · demo parity --------------------------
   async listOperations() {
     const ops = (await store.read("component_operations")) || [];
