@@ -138,6 +138,27 @@ export const db = {
     ops = ops.filter((o) => o.id !== id); await store.write("component_operations", ops);
   },
 
+  // ---- MACHINE PLAN LINES (Phase 2) · demo parity ----------------------------
+  async listMachinePlanLines(month) {
+    const rows = (await store.read("machine_plan_lines")) || [];
+    return rows.filter((r) => r.active !== false && r.month === `${month}-01`).sort((a, b) => (a.machine_id + String(a.seq).padStart(4, "0")).localeCompare(b.machine_id + String(b.seq).padStart(4, "0")));
+  },
+  async addMachinePlanLine({ month, machine_id, component_id, qty, seq }) {
+    const rows = (await store.read("machine_plan_lines")) || [];
+    const row = { id: uid(), month: `${month}-01`, machine_id, component_id, qty: Number(qty) || 0, seq: Number(seq) || 0, active: true, created_at: new Date().toISOString() };
+    rows.push(row); await store.write("machine_plan_lines", rows);
+    return row;
+  },
+  async updateMachinePlanLine(id, fields) {
+    const rows = (await store.read("machine_plan_lines")) || [];
+    const r = rows.find((x) => x.id === id);
+    if (r) { Object.assign(r, fields); await store.write("machine_plan_lines", rows); }
+  },
+  async removeMachinePlanLine(id) {
+    let rows = (await store.read("machine_plan_lines")) || [];
+    rows = rows.filter((r) => r.id !== id); await store.write("machine_plan_lines", rows);
+  },
+
   async deactivateComponent(id) {
     const rows = (await store.read("components")) || [];
     await store.write("components", rows.map((c) => (c.id === id ? { ...c, active: false } : c)));

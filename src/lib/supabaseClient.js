@@ -124,6 +124,30 @@ export const db = {
     if (error) throw error;
   },
 
+  // ---- MACHINE PLAN LINES (Phase 2: per-machine monthly loading) -------------
+  async listMachinePlanLines(month) {
+    const { data, error } = await supabase
+      .from("machine_plan_lines").select("*").eq("month", `${month}-01`).eq("active", true)
+      .order("machine_id").order("seq");
+    if (error) throw error;
+    return data;
+  },
+  async addMachinePlanLine({ month, machine_id, component_id, qty, seq }) {
+    const { data, error } = await supabase.from("machine_plan_lines").insert({
+      month: `${month}-01`, machine_id, component_id, qty: qty || 0, seq: seq || 0,
+    }).select().single();
+    if (error) throw error;
+    return data;
+  },
+  async updateMachinePlanLine(id, fields) {
+    const { error } = await supabase.from("machine_plan_lines").update(fields).eq("id", id);
+    if (error) throw error;
+  },
+  async removeMachinePlanLine(id) {
+    const { error } = await supabase.from("machine_plan_lines").delete().eq("id", id);
+    if (error) throw error;
+  },
+
   // ---- MACHINES ------------------------------------------------------------
   async listMachines() {
     const { data, error } = await supabase

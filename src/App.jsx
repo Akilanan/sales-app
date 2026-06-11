@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import {
   SquaresFour as LayoutDashboard, ClipboardText as ClipboardList,
-  SlidersHorizontal as Settings2, UsersThree as Users, Copy, Plus, Trash as Trash2, Check, SignOut as LogOut, X,
+  SlidersHorizontal as Settings2, UsersThree as Users, Gauge, Copy, Plus, Trash as Trash2, Check, SignOut as LogOut, X,
   TrendUp as TrendingUp, TrendDown as TrendingDown, Clock, ArrowRight,
   Warning as AlertTriangle, ShieldCheck, Backspace as Delete, Minus, Eye, EyeSlash,
 } from "@phosphor-icons/react";
@@ -315,7 +315,7 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
   const [view, setView] = useState("dashboard");
-  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [] });
+  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [] });
   const [live, setLive] = useState(false); // realtime connection state (supabase mode)
 
   const appStatus = useMemo(() => {
@@ -331,8 +331,8 @@ export default function App() {
 
   const loadData = useCallback(async () => {
     const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
-    const [plans, entries, operations] = await Promise.all([db.getPlans(curMonth()), db.listEntries({ month: curMonth() }), db.listOperations ? db.listOperations() : Promise.resolve([])]);
-    setData({ components, machines, plans, entries, operations });
+    const [plans, entries, operations, machinePlan] = await Promise.all([db.getPlans(curMonth()), db.listEntries({ month: curMonth() }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(curMonth()) : Promise.resolve([])]);
+    setData({ components, machines, plans, entries, operations, machinePlan });
   }, []);
 
   const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); await loadData(); };
@@ -376,6 +376,7 @@ export default function App() {
         { id: "dashboard", name: "Dashboard", icon: LayoutDashboard, roles: ["supervisor", "admin"] },
         { id: "entry", name: "Shift Entry", icon: ClipboardList, roles: ["operator", "supervisor", "admin"] },
         { id: "plan", name: "Plan Setup", icon: Settings2, roles: ["supervisor", "admin"] },
+        { id: "loading", name: "Loading", icon: Gauge, roles: ["supervisor", "admin"] },
         { id: "team", name: "Team", icon: Users, roles: ["admin"] },
       ].filter((t) => t.roles.includes(user.role))
     : [];
@@ -413,6 +414,7 @@ export default function App() {
                   {view === "dashboard" && <Dashboard data={data} live={live} setView={setView} />}
                   {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
                   {view === "plan" && <PlanSetup data={data} reload={loadData} />}
+                  {view === "loading" && <MachineLoading data={data} reload={loadData} />}
                   {view === "team" && <TeamAdmin user={user} />}
                 </m.div>
               </AnimatePresence>
@@ -1202,6 +1204,134 @@ function TeamAdmin({ user }) {
         onConfirm={confirmToggle}
         onClose={() => { if (!tBusy) setToggle(null); }}
       />
+    </>
+  );
+}
+
+/* --------------------- Machine Loading (Phase 2) -------------------------- */
+// Per-machine monthly plan: assign parts + quantities to each machine; the app
+// expands each over the part's operations (Phase 1) and rolls up the machine's
+// total load in DAYS vs the working month — your one-tab-per-machine sheet.
+const MACHINE_DAYS = 24; // working days/month (Sundays off), matches the sheets
+
+function machineLoadDays(machineId, machinePlan, operations) {
+  let days = 0;
+  for (const l of (machinePlan || []).filter((x) => x.machine_id === machineId)) {
+    const ops = (operations || []).filter((o) => o.component_id === l.component_id);
+    days += componentCapacity(ops, l.qty).days;
+  }
+  return days;
+}
+
+function loadTone(pct) {
+  return pct > 100 ? { text: "text-bad-ink", bar: "bg-bad", ring: "border-bad/40" }
+    : pct >= 85 ? { text: "text-warn-ink", bar: "bg-warn", ring: "border-warn/30" }
+    : { text: "text-ok-ink", bar: "bg-ok", ring: "border-hair" };
+}
+
+function MachineLoading({ data, reload }) {
+  const { machines, components, operations, machinePlan } = data;
+  const active = machines.filter((m) => m.active !== false);
+  const activeComps = components.filter((c) => c.active !== false);
+  const [selId, setSelId] = useState(active[0]?.id || "");
+  const sel = active.find((m) => m.id === selId) || active[0];
+  const [compId, setCompId] = useState(activeComps[0]?.id || "");
+  const [qty, setQty] = useState("");
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const [delLine, setDelLine] = useState(null); const [delBusy, setDelBusy] = useState(false);
+
+  if (!active.length) return <><PageHead title="Machine Loading" sub="Assign parts to machines and see capacity" /><div className="mt-6"><Empty msg="No machines yet. Seed your machines first." /></div></>;
+
+  const lines = (machinePlan || []).filter((l) => l.machine_id === sel.id);
+  const selDays = machineLoadDays(sel.id, machinePlan, operations);
+  const selPct = Math.round((selDays / MACHINE_DAYS) * 100);
+  const compName = (id) => components.find((c) => c.id === id)?.name || "?";
+  const compOps = (id) => (operations || []).filter((o) => o.component_id === id);
+
+  const addLine = async () => {
+    if (busy || !compId || !qty) return; setBusy(true); setErr("");
+    try { await db.addMachinePlanLine({ month: curMonth(), machine_id: sel.id, component_id: compId, qty: parseInt(qty, 10) || 0, seq: lines.length }); setQty(""); await reload(); }
+    catch (e) { setErr(e.message || "Failed to add"); } finally { setBusy(false); }
+  };
+  const editQty = async (id, v) => { try { await db.updateMachinePlanLine(id, { qty: parseInt(v, 10) || 0 }); await reload(); } catch { /* keep */ } };
+  const confirmDel = async () => { if (delBusy || !delLine) return; setDelBusy(true); try { await db.removeMachinePlanLine(delLine.id); await reload(); setDelLine(null); } catch { /* keep */ } finally { setDelBusy(false); } };
+
+  return (
+    <>
+      <PageHead title="Machine Loading" sub={`${prettyMonth(curMonth())} · planned days vs ${MACHINE_DAYS}-day working month, per machine`} />
+
+      {/* overview: every machine's load at a glance */}
+      <Panel title="All Machines — load this month" tag="01" className="mt-6 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+          {active.map((m) => {
+            const d = machineLoadDays(m.id, machinePlan, operations);
+            const pct = Math.round((d / MACHINE_DAYS) * 100);
+            const tone = loadTone(pct);
+            return (
+              <button key={m.id} onClick={() => setSelId(m.id)} className={`text-left rounded-lg border ${m.id === sel.id ? "border-brand-500 bg-brand-500/[0.06]" : tone.ring + " bg-inset/50 hover:border-brand-500/40"} p-3 transition`}>
+                <div className="font-semibold text-[13px] text-ink truncate">{m.name}</div>
+                <div className="mt-1.5 flex items-baseline gap-1"><span className={`font-mono font-bold tnum ${tone.text}`}>{round1(d)}</span><span className="font-mono text-[11px] text-ink-dim">/ {MACHINE_DAYS}d</span></div>
+                <div className="mt-1.5 h-1.5 rounded-full bg-over overflow-hidden"><div className={`h-full ${tone.bar}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
+                {pct > 100 && <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-bad-ink">over by {round1(d - MACHINE_DAYS)}d</div>}
+              </button>
+            );
+          })}
+        </div>
+      </Panel>
+
+      {/* selected machine's plan */}
+      <Panel title={`Plan — ${sel.name}`} tag="02" right={
+        <select value={selId} onChange={(e) => setSelId(e.target.value)} className="bg-inset border border-hair rounded-lg text-sm text-ink px-3 py-2 font-semibold outline-none focus:border-brand-500 max-w-[180px]">
+          {active.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      }>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
+          <span className="text-ink-soft text-sm">Total load:</span>
+          <span className={`font-mono text-2xl font-bold tnum ${loadTone(selPct).text}`}>{round1(selDays)}<span className="text-ink-dim text-base"> / {MACHINE_DAYS} days</span></span>
+          <div className="flex-1 min-w-[120px] max-w-[280px] h-2 rounded-full bg-over overflow-hidden"><div className={`h-full ${loadTone(selPct).bar}`} style={{ width: `${Math.min(selPct, 100)}%` }} /></div>
+          <span className={`font-mono text-sm font-bold ${loadTone(selPct).text}`}>{selPct}%</span>
+        </div>
+
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full min-w-[520px]">
+            <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.14em] border-b border-hair">
+              <th className="py-2.5 px-2">Part</th><th className="py-2.5 px-2 text-right">Qty</th><th className="py-2.5 px-2 text-right">Ops</th><th className="py-2.5 px-2 text-right">Days</th><th className="py-2.5 px-2 w-10" />
+            </tr></thead>
+            <tbody>
+              {lines.length === 0 ? <tr><td colSpan={5} className="py-5"><Empty msg={`Nothing planned on ${sel.name} yet — add a part below.`} /></td></tr>
+                : lines.map((l) => {
+                  const ops = compOps(l.component_id);
+                  const d = componentCapacity(ops, l.qty).days;
+                  return (
+                    <tr key={l.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025] transition">
+                      <td className="py-2.5 px-2 font-semibold text-sm">{compName(l.component_id)}</td>
+                      <td className="py-2.5 px-2 text-right"><input type="number" min="0" defaultValue={l.qty} onBlur={(e) => editQty(l.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-24`} /></td>
+                      <td className="py-2.5 px-2 text-right font-mono text-sm tnum">{ops.length === 0 ? <span className="text-warn-ink" title="No operations defined for this part — define them in Plan Setup → Routing">none</span> : ops.length}</td>
+                      <td className="py-2.5 px-2 text-right font-mono font-bold text-brand-300 tnum">{round1(d)}</td>
+                      <td className="py-2.5 px-2"><button onClick={() => setDelLine(l)} aria-label="Remove" className="p-2 min-h-[40px] min-w-[40px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={14} /></button></td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+          <div className="sm:col-span-2"><label className={labelCls}>Part</label>
+            <select value={compId} onChange={(e) => { setCompId(e.target.value); setErr(""); }} className={inputCls}>
+              {activeComps.map((c) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` · ${c.code}` : ""}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-2.5 items-end">
+            <div className="flex-1"><label className={labelCls}>Qty</label><input type="number" min="0" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="140" className={inputCls} /></div>
+            <MetalButton onClick={addLine} disabled={!compId || !qty || busy} className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
+          </div>
+        </div>
+        {err && <div role="alert" className={`${errCls} mt-3`}><AlertTriangle size={15} className="shrink-0" />{err}</div>}
+        <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Each part's days come from its operations (Plan Setup → Routing). If a part shows "none" ops, define its operations there first. Over 100% means the machine is overbooked for the month.</span></div>
+      </Panel>
+
+      <ConfirmDialog open={!!delLine} title="Remove from machine plan?" body={delLine ? <>Remove <b className="text-ink">{compName(delLine.component_id)}</b> from {sel.name}'s plan?</> : null} confirmLabel="Remove" danger busy={delBusy} onConfirm={confirmDel} onClose={() => { if (!delBusy) setDelLine(null); }} />
     </>
   );
 }
