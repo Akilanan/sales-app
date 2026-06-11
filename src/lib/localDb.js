@@ -185,6 +185,14 @@ export const db = {
     const c = comps.find((x) => x.id === id);
     if (c) { c.rate = Number(rate) || 0; await store.write("components", comps); }
   },
+  async updateComponent(id, fields) {
+    const comps = (await store.read("components")) || [];
+    const c = comps.find((x) => x.id === id);
+    if (c) { Object.assign(c, fields); await store.write("components", comps); }
+  },
+  async listComponentsAll() {
+    return [...((await store.read("components")) || [])].sort((a, b) => a.name.localeCompare(b.name));
+  },
 
   // ---- SETTINGS + machine capacity (editable) · demo parity ------------------
   async getSettings() {
@@ -252,6 +260,16 @@ export const db = {
   async listMachines() {
     return ((await store.read("machines")) || []).filter((m) => m.active);
   },
+  async listMachinesAll() {
+    return [...((await store.read("machines")) || [])].sort((a, b) => a.code.localeCompare(b.code));
+  },
+  async addMachine({ code, name, shifts = 3, working_days = 24 }) {
+    const ms = (await store.read("machines")) || [];
+    if (ms.some((m) => m.code === code)) throw new Error("A machine with this code already exists.");
+    const row = { id: uid(), code, name: name || code, shifts, working_days, active: true };
+    ms.push(row); await store.write("machines", ms);
+    return row;
+  },
   async getPlans(month) {
     return ((await store.read("monthly_plans")) || []).filter((p) => p.month.slice(0, 7) === month);
   },
@@ -282,6 +300,16 @@ export const db = {
   async removeEntry(id) {
     const rows = (await store.read("production_entries")) || [];
     await store.write("production_entries", rows.filter((e) => e.id !== id));
+  },
+  async updateEntry(id, fields) {
+    const rows = (await store.read("production_entries")) || [];
+    const e = rows.find((x) => x.id === id);
+    if (!e) throw new Error("Entry not found");
+    Object.assign(e, fields); await store.write("production_entries", rows);
+    return e;
+  },
+  async listUsersLite() {
+    return (((await store.read("users")) || [])).map(({ id, name }) => ({ id, name }));
   },
   async listAuditTrail() { return []; },      // demo: no server-side audit
   subscribe() { return () => {}; },           // demo: single-device, no live sync
@@ -323,5 +351,24 @@ export const db = {
     const u = users.find((x) => x.id === id);
     if (u) { u.active = Boolean(active); await store.write("users", users); }
     return true;
+  },
+  async adminResetPassword(id) {
+    const users = (await store.read("users")) || [];
+    const u = users.find((x) => x.id === id);
+    if (!u || u.role === "operator") throw new Error("Pick a manager account");
+    u.password = "demo-" + Math.random().toString(36).slice(2, 8);
+    await store.write("users", users);
+    return { name: u.name, username: u.username, password: u.password };
+  },
+  async adminRegeneratePin(id) {
+    const users = (await store.read("users")) || [];
+    const u = users.find((x) => x.id === id);
+    if (!u || u.role !== "operator") throw new Error("Pick an operator account");
+    const taken = new Set(users.map((x) => String(x.login_code || "")));
+    let pin = "";
+    for (let i = 0; i < 200; i++) { const c = String(1000 + Math.floor(Math.random() * 9000)); if (!taken.has(c)) { pin = c; break; } }
+    if (!pin) throw new Error("Could not allocate a free PIN");
+    u.login_code = pin; await store.write("users", users);
+    return { name: u.name, pin };
   },
 };

@@ -173,6 +173,53 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true }, 200);
     }
 
+    // Reset a MANAGER's password (incl. the admin's own — the in-app way to
+    // rotate a compromised password). New password generated server-side,
+    // returned once for the admin to hand over.
+    if (action === "resetPassword") {
+      const id = String(body?.id || "");
+      if (!id) return json({ error: "Missing id" }, 400);
+      const { data: target } = await admin
+        .from("users").select("name, role").eq("id", id).single();
+      if (!target) return json({ error: "User not found" }, 404);
+      if (target.role === "operator") return json({ error: "Use Regenerate PIN for operators" }, 400);
+      const password = strongPassword(14);
+      const { data: updated, error: uErr } = await admin.auth.admin.updateUserById(id, { password });
+      if (uErr) throw uErr;
+      const email = updated?.user?.email || "";
+      const username = email.replace(/@prana\.app$/, "");
+      return json({ ok: true, manager: { name: target.name, username, password } }, 200);
+    }
+
+    // Regenerate an OPERATOR's PIN. The operator's auth identity is derived from
+    // the PIN (email `<pin>@operator.prana.app`, password `<pin><OPERATOR_SECRET>`),
+    // so email + password + profile login_code all rotate together.
+    if (action === "regeneratePin") {
+      const id = String(body?.id || "");
+      if (!id) return json({ error: "Missing id" }, 400);
+      const { data: target } = await admin
+        .from("users").select("name, role").eq("id", id).single();
+      if (!target) return json({ error: "User not found" }, 404);
+      if (target.role !== "operator") return json({ error: "Use Reset password for managers" }, 400);
+      const { data: existing } = await admin.from("users").select("login_code");
+      const taken = new Set((existing || []).map((r: any) => String(r.login_code || "")));
+      let pin = "";
+      for (let i = 0; i < 200; i++) {
+        const cand = String(100000 + randInt(900000));
+        if (!taken.has(cand)) { pin = cand; break; }
+      }
+      if (!pin) return json({ error: "Could not allocate a free PIN" }, 409);
+      const { error: uErr } = await admin.auth.admin.updateUserById(id, {
+        email: `${pin}@operator.prana.app`,
+        password: `${pin}${operatorSecret}`,
+        email_confirm: true,
+      });
+      if (uErr) throw uErr;
+      const { error: pErr } = await admin.from("users").update({ login_code: pin }).eq("id", id);
+      if (pErr) throw pErr;
+      return json({ ok: true, operator: { name: target.name, pin } }, 200);
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
     // Log the real cause server-side (Workers/Edge logs); never leak DB/internal

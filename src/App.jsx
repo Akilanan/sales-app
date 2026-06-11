@@ -7,7 +7,7 @@ import {
 } from "recharts";
 import {
   SquaresFour as LayoutDashboard, ClipboardText as ClipboardList,
-  SlidersHorizontal as Settings2, UsersThree as Users, Gauge, Copy, Plus, Trash as Trash2, Check, SignOut as LogOut, X,
+  SlidersHorizontal as Settings2, UsersThree as Users, Gauge, Copy, Plus, Trash as Trash2, Check, SignOut as LogOut, X, PencilSimple, ArrowsClockwise, CaretUp, CaretDown,
   TrendUp as TrendingUp, TrendDown as TrendingDown, Clock, ArrowRight,
   Warning as AlertTriangle, ShieldCheck, Backspace as Delete, Minus, Eye, EyeSlash,
 } from "@phosphor-icons/react";
@@ -76,6 +76,20 @@ const SHIFTS = [
 const todayStr = () => new Date().toLocaleDateString("en-CA");
 const curMonth = () => todayStr().slice(0, 7);
 const prettyMonth = (m) => { const [y, mo] = m.split("-"); return new Date(y, mo - 1).toLocaleString("en", { month: "long", year: "numeric" }); };
+// 'YYYY-MM' ± n months — powers the month switcher (history review / pre-planning).
+const addMonths = (m, n) => {
+  const [y, mo] = m.split("-").map(Number);
+  const d = new Date(y, mo - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+// Working days (Sundays off) in a month; `upTo` caps at a day-of-month (for "elapsed").
+const workingDaysIn = (m, upTo = 31) => {
+  const [y, mo] = m.split("-").map(Number);
+  const days = new Date(y, mo, 0).getDate();
+  let n = 0;
+  for (let d = 1; d <= Math.min(days, upTo); d++) if (new Date(y, mo - 1, d).getDay() !== 0) n++;
+  return n;
+};
 
 // Monochrome status (user prefers this over colorful — he saw the colorful
 // shadcn charts and explicitly reverted): on-track recedes (dim gray), behind
@@ -313,20 +327,24 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
   const [view, setView] = useState("dashboard");
-  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [], settings: {} });
+  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [], settings: {}, users: [] });
   const [dataReady, setDataReady] = useState(false); // first post-login fetch landed → swap skeleton for real panels
   const [dir, setDir] = useState(1); // view-swap slide direction (sign of tab-index delta)
+  const [month, setMonth] = useState(curMonth()); // the VIEWED month — switchable for history review / pre-planning
   const [live, setLive] = useState(false); // realtime connection state (supabase mode)
 
   useEffect(() => { (async () => { if (CONFIG_ERROR) { setBooting(false); return; } await seedIfEmpty(); setBooting(false); })(); }, []);
 
   const loadData = useCallback(async () => {
     const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
-    const [plans, entries, operations, machinePlan, settings] = await Promise.all([db.getPlans(curMonth()), db.listEntries({ month: curMonth() }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(curMonth()) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({})]);
-    setData({ components, machines, plans, entries, operations, machinePlan, settings });
-  }, []);
+    const [plans, entries, operations, machinePlan, settings, users] = await Promise.all([db.getPlans(month), db.listEntries({ month }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(month) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({}), db.listUsersLite ? db.listUsersLite() : Promise.resolve([])]);
+    setData({ components, machines, plans, entries, operations, machinePlan, settings, users });
+  }, [month]);
 
-  const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); await loadData(); setDataReady(true); };
+  // Month switch → refetch (skip while logged out / before the first fetch).
+  useEffect(() => { if (user && dataReady) loadData(); }, [loadData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); setMonth(curMonth()); await loadData(); setDataReady(true); };
   const logout = async () => { try { await db.signOut(); } catch { /* ignore */ } setUser(null); setView("dashboard"); setDataReady(false); };
 
   // LIVE SYNC — once signed in, refresh (debounced) whenever anyone logs output
@@ -392,7 +410,20 @@ export default function App() {
           {/* Slim fixed header: wordmark left (layoutId flight target from the
               login lockup) + live status, user, logout right. */}
           <header className="fixed top-0 inset-x-0 z-40 h-16 px-4 sm:px-6 flex items-center justify-between pointer-events-none bg-base/80 backdrop-blur-md border-b border-hair/60">
-            <div className="pointer-events-auto"><Wordmark /></div>
+            <div className="pointer-events-auto flex items-center gap-4 min-w-0">
+              <Wordmark />
+              {/* Month switcher — review past months / pre-plan future ones. Every
+                  screen (dashboard, loading, plans, entries) follows this month. */}
+              {user.role !== "operator" && (
+                <div className={`flex items-center gap-0.5 rounded-lg border px-1 ${month !== curMonth() ? "border-hair-strong bg-white/[0.06]" : "border-hair bg-white/[0.03]"}`}>
+                  <button onClick={() => setMonth(addMonths(month, -1))} aria-label="Previous month" className="min-h-[40px] min-w-[34px] grid place-items-center rounded text-ink-dim hover:text-ink transition">‹</button>
+                  <button onClick={() => setMonth(curMonth())} title={month !== curMonth() ? "Viewing another month — click to return to the current month" : "Current month"} className="font-mono text-[11px] font-semibold tracking-wide text-ink-soft hover:text-ink transition px-1 whitespace-nowrap">
+                    {prettyMonth(month)}{month !== curMonth() && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-warn align-middle" aria-label="Not the current month" />}
+                  </button>
+                  <button onClick={() => setMonth(addMonths(month, 1))} aria-label="Next month" className="min-h-[40px] min-w-[34px] grid place-items-center rounded text-ink-dim hover:text-ink transition">›</button>
+                </div>
+              )}
+            </div>
             <div className="pointer-events-auto flex items-center gap-3">
               {live && (
                 <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ok-ink" title="Live — data updates in real time across devices">
@@ -410,10 +441,10 @@ export default function App() {
                 <m.div key={dataReady ? view : "skeleton"} custom={dir} variants={viewV} initial="enter" animate="center" exit="exit">
                   {!dataReady ? <ViewSkeleton /> : (
                     <>
-                      {view === "dashboard" && <Dashboard data={data} live={live} setView={go} />}
-                      {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
-                      {view === "plan" && <PlanSetup data={data} reload={loadData} />}
-                      {view === "loading" && <MachineLoading data={data} reload={loadData} />}
+                      {view === "dashboard" && <Dashboard data={data} live={live} setView={go} month={month} />}
+                      {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} month={month} />}
+                      {view === "plan" && <PlanSetup data={data} reload={loadData} month={month} setMonth={setMonth} />}
+                      {view === "loading" && <MachineLoading data={data} reload={loadData} month={month} />}
                       {view === "team" && <TeamAdmin user={user} />}
                     </>
                   )}
@@ -609,9 +640,13 @@ function Sidebar({ user, view, setView, logout, status, live }) {
 }
 
 /* ------------------------------ Dashboard --------------------------------- */
-function Dashboard({ data, live }) {
+function Dashboard({ data, live, month = curMonth() }) {
   const { components, plans, entries } = data;
   const planFor = (cid) => plans.find((p) => p.component_id === cid);
+  // Month modes: current = live pace vs days elapsed · past = closed-month
+  // review (full month elapsed) · future = planning preview (nothing elapsed).
+  const isCurrent = month === curMonth();
+  const isPast = month < curMonth();
 
   const totalMonthly = plans.reduce((s, p) => s + p.target_qty, 0);
   const dailyTargetTotal = plans.reduce((s, p) => s + p.target_qty / p.working_days, 0);
@@ -623,15 +658,14 @@ function Dashboard({ data, live }) {
   const monthlyPct = totalMonthly ? Math.round((actualMonthly / totalMonthly) * 100) : 0;
   const dailyPct = dailyTargetTotal ? Math.round((actualToday / dailyTargetTotal) * 100) : 0;
 
-  const dayOfMonth = new Date().getDate();
   // pace vs WORKING days elapsed (exclude Sundays) — calendar days over-count the target.
-  const now = new Date();
-  let workingDaysElapsed = 0;
-  for (let d = 1; d <= dayOfMonth; d++) { if (new Date(now.getFullYear(), now.getMonth(), d).getDay() !== 0) workingDaysElapsed++; }
+  const workingDaysElapsed = isPast ? workingDaysIn(month) : isCurrent ? workingDaysIn(month, new Date().getDate()) : 0;
   const expectedSoFar = Math.min(dailyTargetTotal * workingDaysElapsed, totalMonthly);
   const pace = expectedSoFar ? actualMonthly / expectedSoFar : 1;
   const lvl = levelForPace(pace);
-  const paceText = lvl === "ok" ? "On track to hit the monthly plan" : lvl === "warn" ? "Slightly behind the expected pace" : "Behind the expected pace — needs attention";
+  const paceText = !isCurrent && !isPast ? "Future month — plan preview"
+    : isPast ? (lvl === "ok" ? "Month closed at or above plan" : lvl === "warn" ? "Month closed slightly under plan" : "Month closed under plan")
+    : lvl === "ok" ? "On track to hit the monthly plan" : lvl === "warn" ? "Slightly behind the expected pace" : "Behind the expected pace — needs attention";
   const paceDelta = actualMonthly - expectedSoFar;
   const pacePct = expectedSoFar ? Math.round((actualMonthly / expectedSoFar - 1) * 100) : 0;
 
@@ -665,9 +699,7 @@ function Dashboard({ data, live }) {
   // KPI strip metrics — a balanced 4-tile row, each a DIFFERENT cut so it never
   // repeats the glance banner's monthly number (the old "Produced MTD" tile did).
   const sparkDaily = trend.map((t) => ({ v: t.actual }));               // daily output, for the avg-tile sparkline
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  let totalWorkingDays = 0;
-  for (let d = 1; d <= daysInMonth; d++) { if (new Date(now.getFullYear(), now.getMonth(), d).getDay() !== 0) totalWorkingDays++; }
+  const totalWorkingDays = workingDaysIn(month);
   const workingDaysLeft = Math.max(0, totalWorkingDays - workingDaysElapsed);
   const monthProgress = totalWorkingDays ? Math.round((workingDaysElapsed / totalWorkingDays) * 100) : 0;
   const avgPerDay = workingDaysElapsed ? Math.round(actualMonthly / workingDaysElapsed) : 0;
@@ -676,8 +708,8 @@ function Dashboard({ data, live }) {
   return (
     <>
       <div className="mb-6 flex items-end justify-between gap-3 flex-wrap">
-        <PageHead title="Production Overview" sub={prettyMonth(curMonth())} icon={LayoutDashboard} />
-        <span className="text-ink-soft text-[13px]">{new Date().toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })}</span>
+        <PageHead title="Production Overview" sub={`${prettyMonth(month)}${isPast ? " · closed month" : !isCurrent ? " · future plan" : ""}`} icon={LayoutDashboard} />
+        <span className="text-ink-soft text-[13px]">{isCurrent ? new Date().toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" }) : <span className="font-mono text-[11px] uppercase tracking-wider text-warn-ink">viewing {prettyMonth(month)} — use ‹ › in the header to navigate</span>}</span>
       </div>
 
       {/* GLANCE STATUS — read "are we on track?" in 2 seconds. The traveling
@@ -790,6 +822,7 @@ function Dashboard({ data, live }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {isCurrent && (
         <Panel title="Today — Plan vs Actual" tag="03" className="lg:col-span-5" right={<span className="font-mono text-ink-dim text-[11px] tnum tracking-wide">{today}</span>}>
           <div className="flex items-end justify-between mb-3">
             <div><Eyebrow className="mb-1 !text-[11px]">Actual</Eyebrow><div className="font-mono text-[40px] font-bold tnum leading-none">{actualToday}</div></div>
@@ -807,9 +840,40 @@ function Dashboard({ data, live }) {
               </div>
             ))}
           </div>
+          {/* accountability — who made what, where, TODAY (the question the old
+              paper flow answered via the shift supervisor) */}
+          {todayEntries.length > 0 && (() => {
+            const sumBy = (keyFn, nameFn) => {
+              const acc = {};
+              todayEntries.forEach((e) => { const k = keyFn(e); if (k) acc[k] = (acc[k] || 0) + (e.quantity || 0); });
+              return Object.entries(acc).map(([k, q]) => ({ name: nameFn(k), q })).sort((a, b) => b.q - a.q).slice(0, 5);
+            };
+            const byMachine = sumBy((e) => e.machine_id, (id) => (data.machines || []).find((m) => m.id === id)?.code || "—");
+            const byOperator = sumBy((e) => e.operator_id, (id) => (data.users || []).find((u) => u.id === id)?.name || "—");
+            const MiniList = ({ label, rows }) => (
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim mb-1.5">{label}</div>
+                <ul className="space-y-1">
+                  {rows.map((r) => (
+                    <li key={r.name} className="flex items-baseline justify-between gap-2 text-[12px]">
+                      <span className="text-ink-soft truncate">{r.name}</span>
+                      <span className="font-mono font-bold tnum text-ink shrink-0">{r.q}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+            return (
+              <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-hair">
+                <MiniList label="Today by machine" rows={byMachine} />
+                <MiniList label="Today by operator" rows={byOperator} />
+              </div>
+            );
+          })()}
         </Panel>
+        )}
 
-        <Panel title="Component Performance" tag="04" className="lg:col-span-7">
+        <Panel title="Component Performance" tag="04" className={isCurrent ? "lg:col-span-7" : "lg:col-span-12"}>
           {compData.length === 0 ? <Empty msg="No components with targets yet." /> : (
             <div className="divide-y divide-hair -my-1">
               {compData.map((c, i) => {
@@ -823,7 +887,11 @@ function Dashboard({ data, live }) {
                       {!off && <span className="absolute inset-0 rounded-full" style={{ background: STATUS[cl].hex, opacity: 0.22 }} />}
                       <span className="w-2 h-2 rounded-full" style={{ background: off ? "transparent" : STATUS[cl].hex, border: off ? "1.5px solid rgba(220,228,242,0.18)" : "none" }} />
                     </span>
-                    <span className="font-semibold text-ink text-[13px] w-[7.5rem] shrink-0 truncate">{c.name}</span>
+                    <span className="w-[9rem] shrink-0 min-w-0">
+                      <span className="block font-semibold text-ink text-[13px] truncate">{c.name}</span>
+                      {/* the prorated "expected" needs visible context — title attrs are dead on touch */}
+                      <span className="block font-mono text-[10px] text-ink-dim tnum">exp {c.expected.toLocaleString()} · tgt {c.target.toLocaleString()}</span>
+                    </span>
                     {/* per-component daily sparkline — momentum, not just a static percentage */}
                     <div className="flex-1 h-8 min-w-0">
                       {c.spark.length > 1 ? (
@@ -884,9 +952,12 @@ function Dashboard({ data, live }) {
           <Panel title="Machine Fleet" tag="05" right={<span className="font-mono text-[11px] text-ink-dim">load + output, all machines</span>} className="mt-5">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               <Card label="Machines planned" value={`${planned.length} / ${activeM.length}`} />
-              <Card label="Avg machine load" value={`${avgPct}%`} tone={avgPct > 100 ? "bad" : "ok"} />
+              <Card label="Avg load · planned m/cs" value={`${avgPct}%`} sub={`fleet-wide ${activeM.length ? Math.round(fleet.reduce((a, x) => a + x.pct, 0) / activeM.length) : 0}%`} tone={avgPct > 100 ? "bad" : "ok"} />
               <Card label="Overbooked" value={overbooked} tone={overbooked > 0 ? "bad" : "ok"} />
-              <Card label="Hour-rate" value={inr(hr)} sub={`vs ${inr(targetHr)} target`} tone={hr >= targetHr ? "ok" : hr > 0 ? "bad" : undefined} />
+              {/* ₹0 with no rates configured reads as "we earn nothing" — say the truth instead */}
+              {hrs > 0 && amt === 0
+                ? <Card label="Hour-rate" value="—" sub="set part rates in Loading → Costing" />
+                : <Card label="Hour-rate" value={inr(hr)} sub={`vs ${inr(targetHr)} target`} tone={hr >= targetHr ? "ok" : hr > 0 ? "bad" : undefined} />}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
               {fleet.map((f) => {
@@ -895,14 +966,20 @@ function Dashboard({ data, live }) {
                   <div key={f.m.id} className={`rounded-lg bg-inset/40 border p-2.5 ${f.pct > 100 ? "border-beam-alert border-hair-strong" : "border-hair"}`}>
                     <div className="font-semibold text-[12px] text-ink truncate">{f.m.name}</div>
                     <div className="flex items-baseline justify-between mt-1">
-                      <span className={`font-mono text-[11px] ${f.pct > 100 ? "text-bad-ink" : "text-ink-dim"}`}>{f.planned ? `${f.pct}%` : "idle"}</span>
-                      <span className="font-mono text-[11px] text-ink-soft">{f.out} pcs</span>
+                      {/* "idle" really meant "no plan lines" — and a no-plan machine WITH
+                          output is a planning gap worth surfacing, not hiding */}
+                      <span className={`font-mono text-[11px] ${f.pct > 100 ? "text-bad-ink" : !f.planned && f.out > 0 ? "text-warn-ink" : "text-ink-dim"}`}>{f.planned ? `${f.pct}%` : f.out > 0 ? "no plan*" : "no plan"}</span>
+                      <span className="font-mono text-[11px] text-ink-soft">{f.out} <span className="text-ink-dim">pcs MTD</span></span>
                     </div>
                     <div className="mt-1 h-1 rounded-full bg-over overflow-hidden"><div className={`h-full origin-left transition-transform duration-700 ease-out ${bar}`} style={{ transform: `scaleX(${Math.min(f.pct, 100) / 100})` }} /></div>
                   </div>
                 );
               })}
             </div>
+            {(() => {
+              const unplanned = fleet.filter((f) => !f.planned && f.out > 0).reduce((s, f) => s + f.out, 0);
+              return unplanned > 0 ? <div className={`${warnCls} mt-3`}><AlertTriangle size={15} className="shrink-0" /><span><b className="tnum">{unplanned} pcs</b> this month were logged on machines marked "no plan*" — assign those parts in Loading so plan-vs-actual reconciles.</span></div> : null;
+            })()}
             {!machinePlan.length && <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Assign parts to machines in the Loading tab to see load %, capacity, and hour-rate fill in here. Output (pcs) shows live as operators log production.</span></div>}
           </Panel>
         );
@@ -912,7 +989,7 @@ function Dashboard({ data, live }) {
 }
 
 /* ------------------------------ Shift Entry ------------------------------- */
-function ShiftEntry({ data, user, reload }) {
+function ShiftEntry({ data, user, reload, month = curMonth() }) {
   const { components, machines, entries } = data;
   const [date, setDate] = useState(todayStr());
   const [shift, setShift] = useState(1);
@@ -928,6 +1005,10 @@ function ShiftEntry({ data, user, reload }) {
   const [pending, setPending] = useState([]); // optimistic rows awaiting server ack
   const [delEntry, setDelEntry] = useState(null); // entry pending delete-confirm
   const [delBusy, setDelBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false); // expand past the 9 most recent
+  const [editEntry, setEditEntry] = useState(null); // entry being corrected (manager)
+  const [editBusy, setEditBusy] = useState(false);
+  const [editErr, setEditErr] = useState("");
 
   useEffect(() => { if (!componentId && components[0]) setComponentId(components[0].id); }, [components]);
   useEffect(() => { if (!machineId && machines[0]) setMachineId(machines[0].id); }, [machines]);
@@ -956,6 +1037,19 @@ function ShiftEntry({ data, user, reload }) {
   const isManager = user.role !== "operator";
   const compName = (id) => components.find((c) => c.id === id)?.name || "—";
   const machName = (id) => machines.find((m) => m.id === id)?.code || "—";
+  const userName = (id) => (data.users || []).find((u) => u.id === id)?.name || "—";
+
+  // Correct a saved entry (manager): qty / scrap / notes — the fields typos hit.
+  const saveEdit = async () => {
+    if (editBusy || !editEntry) return;
+    setEditBusy(true); setEditErr("");
+    try {
+      await db.updateEntry(editEntry.id, { quantity: Number(editEntry.quantity) || 0, scrap_qty: Number(editEntry.scrap_qty) || 0, notes: String(editEntry.notes || "").trim() });
+      await reload();
+      setEditEntry(null);
+    } catch (e) { setEditErr(e?.message || "Could not save the correction."); }
+    finally { setEditBusy(false); }
+  };
 
   const dup = entries.find((e) => e.production_date === date && e.shift === shift && e.component_id === componentId && e.operator_id === user.id);
 
@@ -1002,9 +1096,10 @@ function ShiftEntry({ data, user, reload }) {
     finally { setDelBusy(false); }
   };
 
-  let recent = [...entries].sort((a, b) => b.created_at - a.created_at);
-  if (!isManager) recent = recent.filter((e) => e.operator_id === user.id);
-  recent = [...pending, ...recent].slice(0, 9); // optimistic rows lead until acked
+  let allMine = [...entries].sort((a, b) => b.created_at - a.created_at);
+  if (!isManager) allMine = allMine.filter((e) => e.operator_id === user.id);
+  allMine = [...pending, ...allMine]; // optimistic rows lead until acked
+  const recent = showAll ? allMine : allMine.slice(0, 9);
 
   const Stepper = ({ value, set }) => (
     <div className="flex items-center gap-3">
@@ -1062,6 +1157,9 @@ function ShiftEntry({ data, user, reload }) {
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Tool change, machine issue, etc." className={`${inputCls} mb-4 resize-none`} />
 
           {dup && <div className={`${warnCls} mb-3`}><AlertTriangle size={16} className="shrink-0" /><span>You already logged <b>{compName(componentId)}</b> for Shift {shift} on this date. You'll be asked to confirm.</span></div>}
+          {/* month-boundary guard: a backdated/forward-dated entry SAVES fine but
+              lands in another month's view — say so instead of silently "vanishing" */}
+          {date && date.slice(0, 7) !== curMonth() && <div className={`${warnCls} mb-3`}><Clock size={16} className="shrink-0" /><span>This entry is dated <b>{prettyMonth(date.slice(0, 7))}</b> — it will be saved there and won't show on the current month's dashboard. Use the ‹ › month switcher (managers) to review it.</span></div>}
 
           <LiquidButton onClick={open} disabled={!componentId} size="xl" className="group w-full text-base disabled:opacity-50 disabled:pointer-events-none">Record Output <ArrowRight size={20} className="transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" /></LiquidButton>
         </Panel>
@@ -1075,20 +1173,26 @@ function ShiftEntry({ data, user, reload }) {
                 <div key={e.id} className={`flex items-center justify-between px-3.5 py-3 bg-inset border rounded-xl ${isPending ? "border-hair-strong" : "border-hair"}`}>
                   <div className="min-w-0">
                     <div className="font-semibold text-sm text-ink truncate">{compName(e.component_id)}</div>
-                    <div className="font-mono text-[11px] text-ink-dim tnum mt-0.5">{e.production_date} · Shift {e.shift} · {machName(e.machine_id)}{e.scrap_qty ? ` · ${e.scrap_qty} scrap` : ""}{e.notes ? " · note" : ""}</div>
+                    <div className="font-mono text-[11px] text-ink-dim tnum mt-0.5">{e.production_date} · Shift {e.shift} · {machName(e.machine_id)}{isManager ? ` · ${userName(e.operator_id)}` : ""}{e.scrap_qty ? ` · ${e.scrap_qty} scrap` : ""}{e.notes ? " · note" : ""}</div>
                   </div>
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    <div className="text-right tabular-nums">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="text-right tabular-nums mr-1">
                       <div className="font-mono font-bold text-[19px] tnum text-ink leading-none">{e.quantity}</div>
                       <div className="font-mono text-[10px] uppercase tracking-wider text-ink-dim mt-1">units</div>
                     </div>
                     {isPending && <span className="relative flex h-1.5 w-1.5 mr-1" title="Syncing…" aria-label="Syncing"><span className="absolute inline-flex h-full w-full rounded-full bg-ink-soft motion-safe:animate-ping opacity-60" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ink-soft" /></span>}
+                    {isManager && !isPending && <button onClick={() => { setEditErr(""); setEditEntry({ ...e }); }} aria-label="Edit entry" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-ink transition"><PencilSimple size={15} /></button>}
                     {isManager && !isPending && <button onClick={() => setDelEntry(e)} aria-label="Delete entry" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button>}
                   </div>
                 </div>
               );
             })}
           </div>
+          {allMine.length > 9 && (
+            <button onClick={() => setShowAll((v) => !v)} className="mt-3 w-full min-h-[44px] rounded-xl border border-hair bg-inset text-ink-soft hover:text-ink hover:border-brand-500/40 text-[13px] font-semibold transition">
+              {showAll ? "Show recent only" : `View all ${allMine.length} entries · ${prettyMonth(month)}`}
+            </button>
+          )}
           {!isManager && <div className={`${hintCls} mt-3`}><ShieldCheck size={14} className="shrink-0 mt-0.5 text-ink-dim" /><span>Only a supervisor can edit or delete entries.</span></div>}
         </Panel>
       </div>
@@ -1129,6 +1233,30 @@ function ShiftEntry({ data, user, reload }) {
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">Logged</div>
               <div className="text-ink font-semibold text-sm">{toast}</div>
             </div>
+          </m.div>
+        )}
+      </AnimatePresence>
+
+      {/* Correct-entry dialog (manager) — fixes the delete-and-retype dance.
+          The audit trigger logs the before-image server-side. */}
+      <AnimatePresence>
+        {editEntry && (
+          <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-base/85 p-4" onClick={() => !editBusy && setEditEntry(null)}>
+            <m.div role="dialog" aria-modal="true" aria-labelledby="edit-entry-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10, transition: exitTween(dur.modal) }} transition={spring.modal} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-1"><h3 id="edit-entry-title" className="font-display font-bold text-lg">Correct entry</h3><button onClick={() => !editBusy && setEditEntry(null)} aria-label="Close" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06]"><X size={18} /></button></div>
+              <div className="font-mono text-[11px] text-ink-dim tnum mb-4">{compName(editEntry.component_id)} · {editEntry.production_date} · Shift {editEntry.shift} · {machName(editEntry.machine_id)} · {userName(editEntry.operator_id)}</div>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div><label className={labelCls}>Quantity</label><input type="number" min="0" value={editEntry.quantity} onChange={(e) => setEditEntry((x) => ({ ...x, quantity: e.target.value }))} className={inputCls} /></div>
+                <div><label className={labelCls}>Scrap</label><input type="number" min="0" value={editEntry.scrap_qty || 0} onChange={(e) => setEditEntry((x) => ({ ...x, scrap_qty: e.target.value }))} className={inputCls} /></div>
+              </div>
+              <label className={labelCls}>Notes</label>
+              <textarea rows={2} value={editEntry.notes || ""} onChange={(e) => setEditEntry((x) => ({ ...x, notes: e.target.value }))} className={`${inputCls} resize-none mb-4`} />
+              {editErr && <div className={`${errCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>{editErr}</span></div>}
+              <div className="flex gap-3">
+                <m.button onClick={() => setEditEntry(null)} disabled={editBusy} whileTap={{ scale: 0.97 }} transition={spring.tap} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</m.button>
+                <m.button onClick={saveEdit} disabled={editBusy} whileTap={{ scale: 0.97 }} transition={spring.tap} className="flex-1 py-3.5 rounded-lg bg-gradient-to-b from-brand-300 to-brand-500 text-zinc-900 border-b-2 border-brand-700/70 ring-1 ring-inset ring-white/20 hover:brightness-110 active:brightness-95 font-semibold transition flex items-center justify-center gap-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{editBusy ? "Saving…" : <><Check size={18} /> Save correction</>}</m.button>
+              </div>
+            </m.div>
           </m.div>
         )}
       </AnimatePresence>
@@ -1213,6 +1341,25 @@ function TeamAdmin({ user }) {
     catch (e) { setErr(e.message || "Failed to update"); }
     finally { setTBusy(false); }
   };
+  // Credential recovery — a forgotten manager password was a permanent lockout,
+  // and the admin's own (chat-exposed) password had no in-app rotation path.
+  const [recover, setRecover] = useState(null); // user pending reset/regen confirm
+  const [rBusy, setRBusy] = useState(false);
+  const confirmRecover = async () => {
+    if (!recover || rBusy) return;
+    setRBusy(true); setErr("");
+    try {
+      if (recover.role === "operator") {
+        const r = await db.adminRegeneratePin(recover.id);
+        setCreated({ type: "operator", ...r });
+      } else {
+        const r = await db.adminResetPassword(recover.id);
+        setCreated({ type: "manager", role: recover.role, ...r });
+      }
+      await load(); setRecover(null);
+    } catch (e) { setErr(e.message || "Failed to reset credentials"); }
+    finally { setRBusy(false); }
+  };
 
   const operators = (users || []).filter((u) => u.role === "operator");
   const managers = (users || []).filter((u) => u.role !== "operator");
@@ -1258,7 +1405,10 @@ function TeamAdmin({ user }) {
                   <span className={`font-semibold text-sm ${u.active ? "text-ink" : "text-ink-dim line-through"}`}>{u.name}</span>
                   <span className="font-mono text-xs text-ink-soft">PIN {u.login_code}</span>
                   {!u.active && <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim border border-hair rounded px-1.5 py-0.5">disabled</span>}
-                  <button onClick={() => setToggle(u)} className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">{u.active ? "Deactivate" : "Reactivate"}</button>
+                  <span className="ml-auto flex items-center gap-2">
+                    {u.active && <button onClick={() => setRecover(u)} title="Generate a new PIN (the old one stops working)" className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition inline-flex items-center gap-1.5"><ArrowsClockwise size={13} /> New PIN</button>}
+                    <button onClick={() => setToggle(u)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">{u.active ? "Deactivate" : "Reactivate"}</button>
+                  </span>
                 </li>
               ))}
             </ul>}
@@ -1274,7 +1424,10 @@ function TeamAdmin({ user }) {
                   <span className="font-mono text-[10px] uppercase tracking-wider text-brand-300/80 border border-hair rounded px-1.5 py-0.5">{u.role}</span>
                   {u.id === user.id && <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim">you</span>}
                   {!u.active && <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim border border-hair rounded px-1.5 py-0.5">disabled</span>}
-                  {u.id !== user.id && <button onClick={() => setToggle(u)} className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">{u.active ? "Deactivate" : "Reactivate"}</button>}
+                  <span className="ml-auto flex items-center gap-2">
+                    {u.active && <button onClick={() => setRecover(u)} title={u.id === user.id ? "Rotate your own password (the new one is shown once)" : "Generate a new password (the old one stops working)"} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition inline-flex items-center gap-1.5"><ArrowsClockwise size={13} /> Reset password</button>}
+                    {u.id !== user.id && <button onClick={() => setToggle(u)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">{u.active ? "Deactivate" : "Reactivate"}</button>}
+                  </span>
                 </li>
               ))}
             </ul>}
@@ -1290,6 +1443,19 @@ function TeamAdmin({ user }) {
         onConfirm={confirmToggle}
         onClose={() => { if (!tBusy) setToggle(null); }}
       />
+
+      <ConfirmDialog
+        open={!!recover}
+        title={recover?.role === "operator" ? "Generate a new PIN?" : "Reset this password?"}
+        body={recover ? <>{recover.role === "operator"
+          ? <><b className="text-ink">{recover.name}</b> gets a fresh PIN; the old PIN stops working immediately. The new PIN is shown once — hand it over right away.</>
+          : <><b className="text-ink">{recover.name}</b> gets a fresh generated password; the old one stops working immediately. The new password is shown once.{recover.id === user.id ? " You'll need it for your own next login." : ""}</>}</> : null}
+        confirmLabel={recover?.role === "operator" ? "New PIN" : "Reset password"}
+        danger
+        busy={rBusy}
+        onConfirm={confirmRecover}
+        onClose={() => { if (!rBusy) setRecover(null); }}
+      />
     </>
   );
 }
@@ -1297,11 +1463,12 @@ function TeamAdmin({ user }) {
 /* ----------------------------- Costing (Phase 5) -------------------------- */
 // The sheet's costing block: per part — Amount (rate×qty), Hour-Rate vs the
 // ₹2200 target, Targeted amount, Loss. Rolls up to the machine's overall HR.
-function MachineCosting({ machine, lines, operations, components, reload, targetHr = TARGET_HR }) {
+function MachineCosting({ machine, lines, operations, components, reload, targetHr = TARGET_HR, machineRate = 1200 }) {
   const opsByComp = {};
   for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
   const compOf = (id) => (components || []).find((c) => c.id === id) || {};
-  const setRate = async (id, v) => { try { await db.setComponentRate(id, parseFloat(v) || 0); await reload(); } catch { /* keep */ } };
+  const [rErr, setRErr] = useState("");
+  const setRate = async (id, v) => { try { setRErr(""); await db.setComponentRate(id, parseFloat(v) || 0); await reload(); } catch (e) { setRErr(e?.message || "Rate didn't save — please retry."); } };
 
   if (!lines.length) return null;
   let totAmount = 0, totHours = 0, totLoss = 0;
@@ -1313,16 +1480,25 @@ function MachineCosting({ machine, lines, operations, components, reload, target
     return { l, c, hours: cap.total, ...cost };
   });
   const machineHr = totHours > 0 ? totAmount / totHours : 0;
+  const machineCost = machineRate * totHours; // ₹/machine-hour × planned hours (the Excel header's "Machine Hour rate")
+  const ratesUnset = totAmount === 0 && totHours > 0;
   const hrTone = (hr) => hr >= targetHr ? "text-ok-ink" : hr >= targetHr * 0.8 ? "text-warn-ink" : "text-bad-ink";
 
   return (
     <Panel title="Costing" tag="05" right={<span className="font-mono text-[11px] text-ink-dim">target HR {inr(targetHr)}/hr</span>} className="mt-4">
-      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-4">
-        <span className="text-ink-soft text-sm">Machine hour-rate:</span>
-        <span className={`font-mono text-2xl font-bold tnum ${hrTone(machineHr)}`}>{inr(machineHr)}<span className="text-ink-dim text-sm">/hr</span></span>
-        <span className="font-mono text-sm text-ink-soft">vs {inr(targetHr)} target</span>
-        {totLoss > 0 && <span className="font-mono text-sm text-bad-ink">loss {inr(totLoss)}</span>}
-      </div>
+      {ratesUnset ? (
+        /* every rate is 0 → "loss ₹9 lakh" would be fiction. Say what's actually wrong. */
+        <div className={`${warnCls} mb-4`}><AlertTriangle size={15} className="shrink-0" /><span>Part rates aren't set, so hour-rate and loss can't be computed yet — enter each part's <b>Rate ₹/pc</b> below (or in Plan Setup).</span></div>
+      ) : (
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-4">
+          <span className="text-ink-soft text-sm">Machine hour-rate:</span>
+          <span className={`font-mono text-2xl font-bold tnum ${hrTone(machineHr)}`}>{inr(machineHr)}<span className="text-ink-dim text-sm">/hr</span></span>
+          <span className="font-mono text-sm text-ink-soft">vs {inr(targetHr)} target</span>
+          {totLoss > 0 && <span className="font-mono text-sm text-bad-ink">loss {inr(totLoss)}</span>}
+          <span className="font-mono text-sm text-ink-dim" title={`machine cost = ${inr(machineRate)}/hr × ${round1(totHours)} hrs (Settings → Machine hour-rate)`}>machine cost {inr(machineCost)} · margin {inr(totAmount - machineCost)}</span>
+        </div>
+      )}
+      {rErr && <div role="alert" className={`${errCls} mb-4`}><AlertTriangle size={15} className="shrink-0" />{rErr}</div>}
       <div className="overflow-x-auto -mx-1">
         <table className="w-full min-w-[680px]">
           <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.14em] border-b border-hair">
@@ -1340,7 +1516,7 @@ function MachineCosting({ machine, lines, operations, components, reload, target
                 <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round1(r.hours)}</td>
                 <td className={`py-2.5 px-2 text-right font-mono font-bold tnum ${hrTone(r.hr)}`}>{inr(r.hr)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-ink-dim tnum">{inr(r.targeted)}</td>
-                <td className={`py-2.5 px-2 text-right font-mono tnum ${r.loss > 0 ? "text-bad-ink" : "text-ink-dim"}`}>{r.loss > 0 ? inr(r.loss) : "—"}</td>
+                <td className={`py-2.5 px-2 text-right font-mono tnum ${!r.c.rate ? "text-ink-dim" : r.loss > 0 ? "text-bad-ink" : "text-ink-dim"}`}>{!r.c.rate ? "set rate" : r.loss > 0 ? inr(r.loss) : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -1377,7 +1553,9 @@ function MachinePlanVsActual({ machine, lines, operations, components, entries }
               const ops = opsByComp[l.component_id] || [];
               const a = actualFor(l.component_id);
               const planDays = componentCapacity(ops, l.qty).days;
-              const actDays = componentCapacity(ops, a.qty).days;
+              // zero output must read 0 days — setup time alone painted "2.3 days
+              // burned producing nothing" on untouched parts
+              const actDays = a.qty > 0 ? componentCapacity(ops, a.qty).days : 0;
               const variance = a.qty - l.qty;
               const pct = l.qty ? Math.round((a.qty / l.qty) * 100) : 0;
               const tone = pct >= 100 ? "bg-ok text-ok-ink" : pct >= 60 ? "bg-warn text-warn-ink" : "bg-bad text-bad-ink";
@@ -1411,10 +1589,10 @@ function MachinePlanVsActual({ machine, lines, operations, components, entries }
 // A full per-machine table that mirrors the HMC&VMC sheet columns end-to-end:
 // Description, Opn, Cy/Set/Ins time, Plan Qty, MC/LB/Total/Eff hours, Total
 // Days, Start/End date. Read-only report built from Phases 1-3 data.
-function MachineSheet({ machine, lines, operations, components }) {
+function MachineSheet({ machine, lines, operations, components, month = curMonth() }) {
   const opsByComp = {};
   for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
-  const sched = scheduleMachine(lines, opsByComp, curMonth());
+  const sched = scheduleMachine(lines, opsByComp, month);
   const nameOf = (id) => (components || []).find((c) => c.id === id)?.name || "?";
 
   // build full rows (hours breakdown per op) aligned with the schedule order
@@ -1480,11 +1658,11 @@ function MachineSheet({ machine, lines, operations, components }) {
 /* ------------------------ Machine Schedule (Phase 3) ---------------------- */
 // Auto start/end dates per operation (sequential, Sundays off) + a month
 // timeline, mirroring the Start Date / End Date columns in the sheets.
-function MachineSchedule({ machine, lines, operations, components }) {
+function MachineSchedule({ machine, lines, operations, components, month = curMonth() }) {
   const opsByComp = {};
   for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
-  const rows = scheduleMachine(lines, opsByComp, curMonth());
-  const { first, last, totalMs } = monthBounds(curMonth());
+  const rows = scheduleMachine(lines, opsByComp, month);
+  const { first, last, totalMs } = monthBounds(month);
   const nameOf = (id) => (components || []).find((c) => c.id === id)?.name || "?";
 
   if (!rows.length) {
@@ -1505,11 +1683,15 @@ function MachineSchedule({ machine, lines, operations, components }) {
         {rows.map((r, i) => {
           const left = Math.max(0, ((r.start.getTime() - first.getTime()) / totalMs) * 100);
           const width = Math.max(1.5, ((r.end.getTime() - r.start.getTime()) / totalMs) * 100);
+          // today marker — without it a mid-month Gantt reads as "all done"
+          const todayMs = Date.now() - first.getTime();
+          const todayPct = todayMs > 0 && todayMs < totalMs ? (todayMs / totalMs) * 100 : null;
           return (
             <div key={i} className="flex items-center gap-3">
               <div className="w-40 shrink-0 truncate text-[12px]"><span className="font-semibold text-ink">{nameOf(r.component_id)}</span> <span className="font-mono text-ink-dim">op{r.op_no}</span></div>
               <div className="relative flex-1 h-6 rounded bg-inset/60 overflow-hidden">
                 <div className="absolute top-0 h-full rounded bg-gradient-to-r from-brand-500/70 to-brand-400/60 border border-brand-400/40 transition-[left,width] duration-500 ease-out" style={{ left: `${Math.min(left, 98)}%`, width: `${Math.min(width, 100 - Math.min(left, 98))}%` }} title={`${fmtDate(r.start)} → ${fmtDate(r.end)} · ${round1(r.days)}d`} />
+                {todayPct !== null && <div className="absolute top-0 bottom-0 w-px bg-bad/80" style={{ left: `${todayPct}%` }} title={`today · ${todayStr()}`} aria-hidden="true" />}
               </div>
               <div className="w-32 shrink-0 text-right font-mono text-[11px] text-ink-soft tnum">{fmtDate(r.start)}→{fmtDate(r.end)}</div>
             </div>
@@ -1542,7 +1724,7 @@ function loadTone(pct) {
     : { text: "text-ok-ink", bar: "bg-ok", ring: "border-hair" };
 }
 
-function MachineLoading({ data, reload }) {
+function MachineLoading({ data, reload, month = curMonth() }) {
   const { machines, components, operations, machinePlan } = data;
   const active = machines.filter((m) => m.active !== false);
   const activeComps = components.filter((c) => c.active !== false);
@@ -1567,15 +1749,29 @@ function MachineLoading({ data, reload }) {
 
   const addLine = async () => {
     if (busy || !compId || !qty) return; setBusy(true); setErr("");
-    try { await db.addMachinePlanLine({ month: curMonth(), machine_id: sel.id, component_id: compId, qty: parseInt(qty, 10) || 0, seq: lines.length }); setQty(""); await reload(); }
+    try { await db.addMachinePlanLine({ month, machine_id: sel.id, component_id: compId, qty: parseInt(qty, 10) || 0, seq: lines.length }); setQty(""); await reload(); }
     catch (e) { setErr(e.message || "Failed to add"); } finally { setBusy(false); }
   };
-  const editQty = async (id, v) => { try { await db.updateMachinePlanLine(id, { qty: parseInt(v, 10) || 0 }); await reload(); } catch { /* keep */ } };
+  const editQty = async (id, v) => { try { setErr(""); await db.updateMachinePlanLine(id, { qty: parseInt(v, 10) || 0 }); await reload(); } catch (e) { setErr(e?.message || "Quantity didn't save — please retry."); } };
   const confirmDel = async () => { if (delBusy || !delLine) return; setDelBusy(true); try { await db.removeMachinePlanLine(delLine.id); await reload(); setDelLine(null); } catch { /* keep */ } finally { setDelBusy(false); } };
+  // Run-order control: the Gantt schedules strictly in seq order, so swapping seq
+  // with a neighbour is how you say "run part B first" (was delete-and-retype).
+  const moveLine = async (l, dirn) => {
+    const idx = lines.findIndex((x) => x.id === l.id);
+    const other = lines[idx + dirn];
+    if (!other) return;
+    try {
+      setErr("");
+      // index-based renumber (not a raw swap) — survives duplicate seq values
+      await db.updateMachinePlanLine(l.id, { seq: idx + dirn });
+      await db.updateMachinePlanLine(other.id, { seq: idx });
+      await reload();
+    } catch (e) { setErr(e?.message || "Re-ordering failed — please retry."); }
+  };
 
   return (
     <>
-      <PageHead title="Machine Loading" sub={`${prettyMonth(curMonth())} · planned days vs ${MACHINE_DAYS}-day working month, per machine`} />
+      <PageHead title="Machine Loading" sub={`${prettyMonth(month)} · planned days vs each machine's working month`} />
 
       {/* overview: every machine's load at a glance */}
       <Panel title="All Machines — load this month" tag="01" className="mt-6 mb-4">
@@ -1617,12 +1813,21 @@ function MachineLoading({ data, reload }) {
             </tr></thead>
             <tbody>
               {lines.length === 0 ? <tr><td colSpan={5} className="py-5"><Empty msg={`Nothing planned on ${sel.name} yet — add a part below.`} /></td></tr>
-                : lines.map((l) => {
+                : lines.map((l, li) => {
                   const ops = compOps(l.component_id);
                   const d = componentCapacity(ops, l.qty).days;
                   return (
                     <tr key={l.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025] transition">
-                      <td className="py-2.5 px-2 font-semibold text-sm">{compName(l.component_id)}</td>
+                      <td className="py-2.5 px-2">
+                        <div className="flex items-center gap-1.5">
+                          {/* run order — the Gantt schedules top-to-bottom */}
+                          <span className="flex flex-col">
+                            <button onClick={() => moveLine(l, -1)} disabled={li === 0} aria-label="Run earlier" className="p-0.5 text-ink-dim hover:text-ink disabled:opacity-25 transition"><CaretUp size={12} /></button>
+                            <button onClick={() => moveLine(l, 1)} disabled={li === lines.length - 1} aria-label="Run later" className="p-0.5 text-ink-dim hover:text-ink disabled:opacity-25 transition"><CaretDown size={12} /></button>
+                          </span>
+                          <span className="font-semibold text-sm">{compName(l.component_id)}</span>
+                        </div>
+                      </td>
                       <td className="py-2.5 px-2 text-right"><input type="number" min="0" defaultValue={l.qty} onBlur={(e) => editQty(l.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-24`} /></td>
                       <td className="py-2.5 px-2 text-right font-mono text-sm tnum">{ops.length === 0 ? <span className="text-warn-ink" title="No operations defined for this part — define them in Plan Setup → Routing">none</span> : ops.length}</td>
                       <td className="py-2.5 px-2 text-right font-mono font-bold text-brand-300 tnum">{round1(d)}</td>
@@ -1650,13 +1855,13 @@ function MachineLoading({ data, reload }) {
       </Panel>
 
       {/* Phase 3: auto schedule — operations sequenced with start/end dates */}
-      <MachineSchedule machine={sel} lines={lines} operations={operations} components={components} />
+      <MachineSchedule machine={sel} lines={lines} operations={operations} components={components} month={month} />
 
       {/* Excel replica — the full plan sheet */}
-      <MachineSheet machine={sel} lines={lines} operations={operations} components={components} />
+      <MachineSheet machine={sel} lines={lines} operations={operations} components={components} month={month} />
 
       {/* Phase 5: costing (hour-rate vs target) */}
-      <MachineCosting machine={sel} lines={lines} operations={operations} components={components} reload={reload} targetHr={Number(data.settings?.target_hr) || TARGET_HR} />
+      <MachineCosting machine={sel} lines={lines} operations={operations} components={components} reload={reload} targetHr={Number(data.settings?.target_hr) || TARGET_HR} machineRate={Number(data.settings?.machine_rate) || 1200} />
 
       {/* Phase 4: plan vs actual (the sheet's Actual section) */}
       <MachinePlanVsActual machine={sel} lines={lines} operations={operations} components={components} entries={data.entries} />
@@ -1768,16 +1973,41 @@ function ExcelImport({ data, reload }) {
   );
 }
 
-// Editable settings: target hour-rate + per-machine working days / shifts.
+// Editable settings: target hour-rate + per-machine working days / shifts /
+// rename / retire / add. The machine fleet itself is managed here.
 function SettingsPanel({ data, reload }) {
   const machines = (data.machines || []).filter((m) => m.active !== false);
   const [hr, setHr] = useState(String(data.settings?.target_hr || "2200"));
   const [mr, setMr] = useState(String(data.settings?.machine_rate || "1200"));
   const [saved, setSaved] = useState(false);
   const [savedMr, setSavedMr] = useState(false);
-  const saveHr = async () => { try { await db.setSetting("target_hr", parseInt(hr, 10) || 2200); setSaved(true); setTimeout(() => setSaved(false), 1500); await reload(); } catch { /* keep */ } };
-  const saveMr = async () => { try { await db.setSetting("machine_rate", parseInt(mr, 10) || 1200); setSavedMr(true); setTimeout(() => setSavedMr(false), 1500); await reload(); } catch { /* keep */ } };
-  const saveMachine = async (id, field, v) => { try { await db.setMachine(id, { [field]: Math.max(field === "shifts" ? 1 : 1, parseInt(v, 10) || 1) }); await reload(); } catch { /* keep */ } };
+  const [sErr, setSErr] = useState("");
+  const [newCode, setNewCode] = useState(""); const [addBusy, setAddBusy] = useState(false);
+  const [retire, setRetire] = useState(null); const [retireBusy, setRetireBusy] = useState(false);
+  const [showRetired, setShowRetired] = useState(false); const [retired, setRetired] = useState([]);
+  const guard = async (fn) => { try { setSErr(""); await fn(); await reload(); } catch (e) { setSErr(e?.message || "That change didn't save — please retry."); } };
+  const saveHr = () => guard(async () => { await db.setSetting("target_hr", parseInt(hr, 10) || 2200); setSaved(true); setTimeout(() => setSaved(false), 1500); });
+  const saveMr = () => guard(async () => { await db.setSetting("machine_rate", parseInt(mr, 10) || 1200); setSavedMr(true); setTimeout(() => setSavedMr(false), 1500); });
+  const saveMachine = (id, field, v) => guard(() => db.setMachine(id, { [field]: Math.max(1, parseInt(v, 10) || 1) }));
+  const renameMachine = (id, v, old) => { const name = String(v || "").trim(); if (name && name !== old) guard(() => db.setMachine(id, { name })); };
+  const addMachine = async () => {
+    const code = newCode.trim();
+    if (!code || addBusy) return;
+    setAddBusy(true);
+    try { setSErr(""); await db.addMachine({ code, name: code }); setNewCode(""); await reload(); }
+    catch (e) { setSErr(e?.message || "Could not add the machine."); }
+    finally { setAddBusy(false); }
+  };
+  const loadRetired = async () => { try { setRetired(((await db.listMachinesAll()) || []).filter((m) => m.active === false)); } catch { setRetired([]); } };
+  const toggleRetired = async () => { const v = !showRetired; setShowRetired(v); if (v) await loadRetired(); };
+  const confirmRetire = async () => {
+    if (!retire || retireBusy) return;
+    setRetireBusy(true);
+    try { await db.setMachine(retire.id, { active: false }); await reload(); setRetire(null); if (showRetired) await loadRetired(); }
+    catch (e) { setSErr(e?.message || "Could not retire the machine."); }
+    finally { setRetireBusy(false); }
+  };
+  const restoreMachine = (id) => guard(async () => { await db.setMachine(id, { active: true }); await loadRetired(); });
 
   return (
     <Panel title="Settings — capacity & costing" tag="05" className="mt-4">
@@ -1800,24 +2030,60 @@ function SettingsPanel({ data, reload }) {
         </div>
       </div>
 
-      <label className={labelCls}>Per-machine working days &amp; shifts</label>
+      <AnimatePresence>{sErr && <m.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: dur.pop, ease: ease.out }}><div role="alert" className={`${errCls} mb-4`}><AlertTriangle size={15} className="shrink-0" />{sErr}</div></m.div>}</AnimatePresence>
+
+      <div className="flex items-center justify-between gap-3">
+        <label className={labelCls}>Machines — name, working days &amp; shifts</label>
+        <button onClick={toggleRetired} className="font-mono text-[11px] text-ink-dim hover:text-ink transition underline underline-offset-2">{showRetired ? "hide retired" : "show retired"}</button>
+      </div>
       <div className="overflow-x-auto -mx-1 mt-1">
-        <table className="w-full min-w-[420px]">
+        <table className="w-full min-w-[520px]">
           <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.14em] border-b border-hair">
-            <th className="py-2.5 px-2">Machine</th><th className="py-2.5 px-2 text-right">Working days</th><th className="py-2.5 px-2 text-right">Shifts</th>
+            <th className="py-2.5 px-2">Machine</th><th className="py-2.5 px-2 text-right">Working days</th><th className="py-2.5 px-2 text-right">Shifts</th><th className="py-2.5 px-2 w-10" />
           </tr></thead>
           <tbody>
             {machines.map((m) => (
               <tr key={m.id} className="border-b border-hair last:border-0">
-                <td className="py-2 px-2 font-semibold text-sm">{m.name}</td>
+                <td className="py-2 px-2"><input defaultValue={m.name} onBlur={(e) => renameMachine(m.id, e.target.value, m.name)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} aria-label={`Rename ${m.name}`} className="w-full min-w-[140px] px-2.5 py-2 min-h-[44px] bg-transparent border border-transparent hover:border-hair-strong focus:border-brand-500 focus:bg-inset rounded-lg font-semibold text-sm text-ink outline-none transition" /></td>
                 <td className="py-2 px-2 text-right"><input type="number" min="1" defaultValue={m.working_days || 24} onBlur={(e) => saveMachine(m.id, "working_days", e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-20`} /></td>
                 <td className="py-2 px-2 text-right"><input type="number" min="1" max="3" defaultValue={m.shifts || 3} onBlur={(e) => saveMachine(m.id, "shifts", e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-16`} /></td>
+                <td className="py-2 px-2"><button onClick={() => setRetire(m)} aria-label={`Retire ${m.name}`} title="Retire machine" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Working days set each machine's monthly capacity on the Loading screen (default 24, Sundays off). Edit a value and click away to save.</span></div>
+      {showRetired && (
+        <div className="mt-3 border-t border-hair pt-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim mb-2">Retired machines</div>
+          {retired.length === 0 ? <div className="text-ink-dim text-sm">None.</div> : (
+            <ul className="divide-y divide-hair">
+              {retired.map((m) => (
+                <li key={m.id} className="flex items-center gap-3 py-2.5">
+                  <span className="font-semibold text-sm text-ink-dim line-through">{m.name}</span>
+                  <button onClick={() => restoreMachine(m.id)} className="ml-auto text-xs font-semibold px-3 py-1.5 min-h-[40px] rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">Restore</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <div className="mt-4 flex gap-2.5 items-end max-w-md">
+        <div className="flex-1"><label className={labelCls} htmlFor="new-machine">Add machine (code / name)</label><input id="new-machine" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addMachine()} placeholder="e.g. VMC-3" className={inputCls} /></div>
+        <MetalButton onClick={addMachine} disabled={!newCode.trim() || addBusy} className="disabled:opacity-50 disabled:pointer-events-none">{addBusy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
+      </div>
+      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Working days set each machine's monthly capacity on the Loading screen (default 24, Sundays off). Rename, retire or add machines here — retiring keeps all history and is reversible.</span></div>
+
+      <ConfirmDialog
+        open={!!retire}
+        title="Retire this machine?"
+        body={retire ? <>This hides <b className="text-ink">{retire.name}</b> from entry, loading and the dashboard. Its history is kept — restore it anytime via "show retired".</> : null}
+        confirmLabel="Retire machine"
+        danger
+        busy={retireBusy}
+        onConfirm={confirmRetire}
+        onClose={() => { if (!retireBusy) setRetire(null); }}
+      />
     </Panel>
   );
 }
@@ -1922,25 +2188,57 @@ function OperationsPanel({ data, reload }) {
   );
 }
 
-function PlanSetup({ data, reload }) {
+function PlanSetup({ data, reload, month = curMonth(), setMonth }) {
   const { components, plans } = data;
-  const month = curMonth();
   const [name, setName] = useState(""); const [code, setCode] = useState(""); const [industry, setIndustry] = useState("railway");
   const [adding, setAdding] = useState(false);
   const [delComp, setDelComp] = useState(null); // component pending remove-confirm
   const [delBusy, setDelBusy] = useState(false);
+  const [pErr, setPErr] = useState(""); // inline-edit failures must NOT be silent
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [removed, setRemoved] = useState([]);
 
   const planFor = (cid) => plans.find((p) => p.component_id === cid);
-  const changeTarget = async (cid, v) => { const p = planFor(cid); await db.upsertPlan({ month, component_id: cid, target_qty: parseInt(v, 10) || 0, working_days: p?.working_days ?? 26 }); await reload(); };
-  const changeWD = async (cid, v) => { const p = planFor(cid); await db.upsertPlan({ month, component_id: cid, target_qty: p?.target_qty ?? 0, working_days: Math.max(1, parseInt(v, 10) || 1) }); await reload(); };
-  const addComponent = async () => { if (!name.trim() || adding) return; setAdding(true); try { await db.addComponent({ code: code.trim(), name: name.trim(), industry }); setName(""); setCode(""); await reload(); } finally { setAdding(false); } };
+  const guard = async (fn) => { try { setPErr(""); await fn(); await reload(); } catch (e) { setPErr(e?.message || "That change didn't save — please retry."); } };
+  const changeTarget = (cid, v) => guard(() => db.upsertPlan({ month, component_id: cid, target_qty: parseInt(v, 10) || 0, working_days: planFor(cid)?.working_days ?? 24 }));
+  const changeWD = (cid, v) => guard(() => db.upsertPlan({ month, component_id: cid, target_qty: planFor(cid)?.target_qty ?? 0, working_days: Math.max(1, parseInt(v, 10) || 1) }));
+  const editComp = (id, fields) => guard(() => db.updateComponent(id, fields));
+  const editRate = (id, v) => guard(() => db.setComponentRate(id, parseFloat(v) || 0));
+  const addComponent = async () => { if (!name.trim() || adding) return; setAdding(true); try { await db.addComponent({ code: code.trim(), name: name.trim(), industry }); setName(""); setCode(""); setPErr(""); await reload(); } catch (e) { setPErr(e?.message || "Could not add the component."); } finally { setAdding(false); } };
   // Destructive: only runs after the focus-trapped ConfirmDialog is confirmed.
   const confirmRemoveComponent = async () => {
     if (delBusy || !delComp) return;
     setDelBusy(true);
-    try { await db.deactivateComponent(delComp.id); await reload(); setDelComp(null); }
+    try { await db.deactivateComponent(delComp.id); await reload(); setDelComp(null); if (showRemoved) await loadRemoved(); }
     catch { /* leave the dialog open so the user can retry */ }
     finally { setDelBusy(false); }
+  };
+  const loadRemoved = async () => {
+    try { setRemoved(((await db.listComponentsAll()) || []).filter((c) => c.active === false)); } catch { setRemoved([]); }
+  };
+  const toggleRemoved = async () => { const v = !showRemoved; setShowRemoved(v); if (v) await loadRemoved(); };
+  const restoreComp = (id) => guard(async () => { await db.updateComponent(id, { active: true }); await loadRemoved(); });
+
+  // Carry the previous month's plan forward — targets + working days AND the
+  // per-machine loading lines. The monthly retype was the #1 rollover pain.
+  const copyLastMonth = async () => {
+    if (copyBusy) return;
+    setCopyBusy(true); setPErr("");
+    try {
+      const prev = addMonths(month, -1);
+      const [prevPlans, prevLines] = await Promise.all([db.getPlans(prev), db.listMachinePlanLines ? db.listMachinePlanLines(prev) : Promise.resolve([])]);
+      if (!prevPlans.length && !prevLines.length) { setPErr(`Nothing planned in ${prettyMonth(prev)} to copy.`); return; }
+      for (const p of prevPlans) await db.upsertPlan({ month, component_id: p.component_id, target_qty: p.target_qty, working_days: p.working_days });
+      const existing = data.machinePlan || [];
+      let seq = existing.length;
+      for (const l of prevLines) {
+        if (existing.some((x) => x.machine_id === l.machine_id && x.component_id === l.component_id)) continue;
+        await db.addMachinePlanLine({ month, machine_id: l.machine_id, component_id: l.component_id, qty: l.qty, seq: seq++ });
+      }
+      await reload();
+    } catch (e) { setPErr(e?.message || "Copy failed — please retry."); }
+    finally { setCopyBusy(false); }
   };
 
   return (
@@ -1949,11 +2247,16 @@ function PlanSetup({ data, reload }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 mt-6">
         <Panel title="Planning Period" tag="01">
-          <label className={labelCls}>Plan Month</label>
-          <input value={prettyMonth(month)} disabled className={`${inputCls} opacity-70 mb-4`} />
+          <label className={labelCls} htmlFor="plan-month">Plan Month</label>
+          <input id="plan-month" type="month" value={month} onChange={(e) => setMonth && e.target.value && setMonth(e.target.value)} className={`${inputCls} mb-3`} />
+          {plans.length === 0 && (
+            <MetalButton onClick={copyLastMonth} disabled={copyBusy} fullWidth className="mb-3 disabled:opacity-50 disabled:pointer-events-none">
+              {copyBusy ? "Copying…" : <><Copy size={16} /> Copy {prettyMonth(addMonths(month, -1))}'s plan</>}
+            </MetalButton>
+          )}
           <div className="bg-inset border border-hair rounded-xl p-4 text-sm text-ink leading-relaxed">
             <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-brand-300/80 mb-1.5">Note</div>
-            Each component has its own <b>monthly target</b> and <b>working days</b>. Daily target = target ÷ working days, then split across the 3 shifts.
+            Each component has its own <b>monthly target</b> and <b>working days</b>. Daily target = target ÷ working days, then split across the 3 shifts. Pick a future month here (or with the ‹ › header switcher) to pre-plan it.
           </div>
         </Panel>
 
@@ -1972,23 +2275,35 @@ function PlanSetup({ data, reload }) {
         </Panel>
       </div>
 
-      <Panel title="Components, Targets & Working Days" tag="03">
+      <AnimatePresence>{pErr && <m.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: dur.pop, ease: ease.out }}><div role="alert" className={`${errCls} mb-4`}><AlertTriangle size={15} className="shrink-0" />{pErr}</div></m.div>}</AnimatePresence>
+
+      <Panel title="Components, Targets & Working Days" tag="03" right={
+        <button onClick={toggleRemoved} className="font-mono text-[11px] text-ink-dim hover:text-ink transition underline underline-offset-2">{showRemoved ? "hide removed" : "show removed"}</button>
+      }>
         <div className="overflow-x-auto -mx-1">
-          <table className="w-full min-w-[640px]">
+          <table className="w-full min-w-[820px]">
             <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.15em] border-b border-hair">
-              <th className="py-2.5 px-2.5">Component</th><th className="py-2.5 px-2.5">Industry</th>
+              <th className="py-2.5 px-2.5">Component</th><th className="py-2.5 px-2.5">Code</th><th className="py-2.5 px-2.5">Industry</th>
               <th className="py-2.5 px-2.5 text-right">Monthly Target</th><th className="py-2.5 px-2.5 text-right">Working Days</th>
+              <th className="py-2.5 px-2.5 text-right">Rate ₹/pc</th>
               <th className="py-2.5 px-2.5 text-right">Daily</th><th className="py-2.5 px-2.5 text-right">Per Shift</th><th className="py-2.5 px-2.5 w-10" />
             </tr></thead>
             <tbody>
               {components.map((c) => {
-                const p = planFor(c.id); const target = p?.target_qty ?? 0; const wd = p?.working_days ?? 26; const daily = target / wd;
+                const p = planFor(c.id); const target = p?.target_qty ?? 0; const wd = p?.working_days ?? 24; const daily = target / wd;
                 return (
                   <tr key={c.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025] transition">
-                    <td className="py-3 px-2.5 font-semibold text-sm">{c.name}{c.code && <span className="text-ink-dim font-normal font-mono text-xs"> · {c.code}</span>}</td>
-                    <td className="py-3 px-2.5 text-sm text-ink-soft capitalize">{c.industry || "—"}</td>
+                    <td className="py-3 px-2.5"><input defaultValue={c.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.name) editComp(c.id, { name: v }); else e.target.value = c.name; }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} aria-label={`Name of ${c.name}`} className="w-full min-w-[150px] px-2.5 py-2 min-h-[44px] bg-transparent border border-transparent hover:border-hair-strong focus:border-brand-500 focus:bg-inset rounded-lg font-semibold text-sm text-ink outline-none transition" /></td>
+                    <td className="py-3 px-2.5"><input defaultValue={c.code || ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (c.code || "")) editComp(c.id, { code: v || null }); }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} aria-label={`Code of ${c.name}`} className="w-24 px-2.5 py-2 min-h-[44px] bg-transparent border border-transparent hover:border-hair-strong focus:border-brand-500 focus:bg-inset rounded-lg font-mono text-xs text-ink-soft outline-none transition" /></td>
+                    <td className="py-3 px-2.5">
+                      <select defaultValue={c.industry || ""} onChange={(e) => editComp(c.id, { industry: e.target.value || null })} aria-label={`Industry of ${c.name}`} className="bg-inset border border-hair rounded-lg text-xs text-ink-soft px-2 py-2 min-h-[44px] capitalize outline-none focus:border-brand-500">
+                        <option value="">—</option>
+                        {["railway", "wind", "marine", "other"].map((i) => <option key={i} value={i}>{i}</option>)}
+                      </select>
+                    </td>
                     <td className="py-3 px-2.5 text-right"><input type="number" min="0" defaultValue={target} onBlur={(e) => changeTarget(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={cellCls} /></td>
                     <td className="py-3 px-2.5 text-right"><input type="number" min="1" defaultValue={wd} onBlur={(e) => changeWD(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={cellCls} /></td>
+                    <td className="py-3 px-2.5 text-right"><input type="number" min="0" defaultValue={c.rate || 0} onBlur={(e) => { if ((parseFloat(e.target.value) || 0) !== (c.rate || 0)) editRate(c.id, e.target.value); }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} aria-label={`Rate of ${c.name}`} className={cellCls} /></td>
                     <td className="py-3 px-2.5 text-right font-bold text-brand-300 font-mono tnum">{daily.toFixed(1)}</td>
                     <td className="py-3 px-2.5 text-right text-ink-soft font-mono tnum">{(daily / 3).toFixed(1)}</td>
                     <td className="py-3 px-2.5"><button onClick={() => setDelComp(c)} aria-label={`Remove ${c.name}`} className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button></td>
@@ -1998,7 +2313,23 @@ function PlanSetup({ data, reload }) {
             </tbody>
           </table>
         </div>
-        <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Edit a target or working days and click away (or press Enter) to save. Removing a component hides it but keeps its production history.</span></div>
+        {showRemoved && (
+          <div className="mt-3 border-t border-hair pt-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim mb-2">Removed components</div>
+            {removed.length === 0 ? <div className="text-ink-dim text-sm">None.</div> : (
+              <ul className="divide-y divide-hair">
+                {removed.map((c) => (
+                  <li key={c.id} className="flex items-center gap-3 py-2.5">
+                    <span className="font-semibold text-sm text-ink-dim line-through">{c.name}</span>
+                    {c.code && <span className="font-mono text-xs text-ink-dim">{c.code}</span>}
+                    <button onClick={() => restoreComp(c.id)} className="ml-auto text-xs font-semibold px-3 py-1.5 min-h-[40px] rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">Restore</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Every cell is editable — name, code, industry, target, working days and rate save when you click away (or press Enter). Removing a component hides it; restore it anytime via "show removed".</span></div>
       </Panel>
 
       <div className="mt-4"><OperationsPanel data={data} reload={reload} /></div>
@@ -2008,7 +2339,7 @@ function PlanSetup({ data, reload }) {
       <ConfirmDialog
         open={!!delComp}
         title="Remove this component?"
-        body={delComp ? <>This hides <b className="text-ink">{delComp.name}</b>{delComp.code ? ` (${delComp.code})` : ""} from entry and planning. Its production history is kept, and you can re-add it later.</> : null}
+        body={delComp ? <>This hides <b className="text-ink">{delComp.name}</b>{delComp.code ? ` (${delComp.code})` : ""} from entry and planning. Its production history is kept — restore it anytime via "show removed".</> : null}
         confirmLabel="Remove component"
         danger
         busy={delBusy}

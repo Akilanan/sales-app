@@ -101,6 +101,17 @@ export const db = {
     const { error } = await supabase.from("components").update({ rate: Number(rate) || 0 }).eq("id", id);
     if (error) throw error;
   },
+  // Edit name/code/industry after creation, or restore (active: true) a removed part.
+  async updateComponent(id, fields) {
+    const { error } = await supabase.from("components").update(fields).eq("id", id);
+    if (error) throw error;
+  },
+  // Including inactive — for the "Show removed" restore list only.
+  async listComponentsAll() {
+    const { data, error } = await supabase.from("components").select("*").order("name");
+    if (error) throw error;
+    return data;
+  },
 
   // ---- SETTINGS + machine capacity (editable) -------------------------------
   async getSettings() {
@@ -174,6 +185,21 @@ export const db = {
     if (error) throw error;
     return data;
   },
+  async listMachinesAll() {
+    const { data, error } = await supabase.from("machines").select("*").order("code");
+    if (error) throw error;
+    return data;
+  },
+  async addMachine({ code, name, shifts = 3, working_days = 24 }) {
+    const { data, error } = await supabase.from("machines")
+      .insert({ code, name: name || code, shifts, working_days })
+      .select().single();
+    if (error) {
+      if (error.code === "23505") throw new Error("A machine with this code already exists.");
+      throw error;
+    }
+    return data;
+  },
 
   // ---- MONTHLY PLAN --------------------------------------------------------
   async getPlans(month /* 'YYYY-MM' */) {
@@ -219,6 +245,21 @@ export const db = {
   async removeEntry(id) {
     const { error } = await supabase.from("production_entries").delete().eq("id", id);
     if (error) throw error;
+  },
+  // Correct a saved entry (managers; RLS entries_update_managers). The existing
+  // audit trigger logs the before-image automatically.
+  async updateEntry(id, fields) {
+    const { data, error } = await supabase
+      .from("production_entries").update(fields).eq("id", id).select().single();
+    if (error) throw error;
+    return { ...data, created_at: toMs(data.created_at) };
+  },
+  // id→name map for showing WHO logged each entry. RLS scopes it naturally:
+  // managers see everyone (users_select_managers), operators see only themselves.
+  async listUsersLite() {
+    const { data, error } = await supabase.from("users").select("id, name");
+    if (error) return [];
+    return data || [];
   },
 
   // ---- extras (not used by the current UI; ready for Phase 2) --------------
@@ -273,6 +314,16 @@ export const db = {
     const { error } = await supabase.functions.invoke("admin-users", { body: { action: "setActive", id, active } });
     if (error) throw new Error((await readFnError(error)) || "Failed to update");
     return true;
+  },
+  async adminResetPassword(id) {
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action: "resetPassword", id } });
+    if (error) throw new Error((await readFnError(error)) || "Failed to reset password");
+    return data?.manager; // { name, username, password }
+  },
+  async adminRegeneratePin(id) {
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action: "regeneratePin", id } });
+    if (error) throw new Error((await readFnError(error)) || "Failed to regenerate PIN");
+    return data?.operator; // { name, pin }
   },
 };
 
