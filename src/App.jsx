@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
-import { m, AnimatePresence, useMotionValue, useTransform, useSpring, animate } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
+import NumberFlow from "@number-flow/react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Cell, AreaChart, Area, ReferenceLine, LabelList,
@@ -14,72 +15,55 @@ import { db, seedIfEmpty, MODE, CONFIG_ERROR } from "./lib/db";
 import ScrollExpandMedia from "./components/ui/ScrollExpandMedia";
 import { LiquidButton, MetalButton } from "./components/ui/buttons";
 import { NavBar } from "./components/ui/tubelight-navbar";
-import { EtheralShadow } from "./components/ui/etheral-shadow";
 import { opHours, componentCapacity, round1, round2, costing, inr, TARGET_HR } from "./lib/capacity";
 import { scheduleMachine, monthBounds, fmtDate } from "./lib/schedule";
-
-// Login hero imagery (industrial). onError in ScrollExpandMedia falls back from
-// the expanding media to the background photo, so a 404 never shows a broken icon.
-const HERO_BG = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1920&q=80";
-const HERO_MEDIA = "https://images.unsplash.com/photo-1504917595217-d4dc5ebe6122?auto=format&fit=crop&w=1500&q=80";
+import { spring, ease, dur, tween, exitTween } from "./lib/motion";
+import { LOW_POWER } from "./lib/power";
 
 /* ============================================================================
-   PRANA VENTURE — "COLD STEEL" UI · arctic graphite, ONE solid electric-blue
-   accent (no glow), matte studio-lit 3D, crosshair precision marks, mono data.
-   Drawn from igloo (steel monochrome + atmosphere) and lusion (Klein-blue +
-   matte 3D + crosshair). Colour reserved for the blue brand + production STATUS
-   (green/amber/red, always with a label + icon). Same data layer.
+   PRANA VENTURE — MONOCHROME instrument console. Near-black zinc shell, white/
+   silver type, NO colour accents — brightness encodes urgency (white = critical).
+   Depth via layered edge-light shadows + a faint overhead glow + film grain.
+   Motion tuned for "instrument" feel (see lib/motion.js): fast, low-bounce.
 ============================================================================ */
 
-const Ambient = lazy(() => import("./lib/Ambient"));
 const REDUCED = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-// Low-power devices (shop-floor tablets) get a lightweight static glow, not WebGL.
-const LOW_POWER = typeof navigator !== "undefined" && (
-  (navigator.deviceMemory && navigator.deviceMemory <= 4) ||
-  (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4) ||
-  (navigator.connection && navigator.connection.saveData === true) // metered/data-saver tablet → skip 3D entirely
-);
-// Probe actual WebGL support — deviceMemory is undefined on iOS Safari, so the
-// heuristic above can't be trusted alone. No context → static fallback.
-function webglSupported() {
-  if (typeof document === "undefined") return false;
-  try {
-    const c = document.createElement("canvas");
-    return !!(c.getContext("webgl2") || c.getContext("webgl"));
-  } catch {
-    return false;
-  }
-}
-const NO_WEBGL = !webglSupported();
 
-// If the 3D scene throws at runtime, fall back to the static glow instead of a
-// blank/broken panel.
-class SceneBoundary extends React.Component {
+// The 3D hero is heavy (three.js) — code-split it so it never blocks first paint.
+const Ambient = lazy(() => import("./lib/Ambient"));
+
+// If WebGL throws (lost context, no GPU, driver crash) the hero must degrade to
+// the black panel, never a blank/broken login.
+class HeroErrorBoundary extends React.Component {
   constructor(p) { super(p); this.state = { failed: false }; }
   static getDerivedStateFromError() { return { failed: true }; }
-  render() { return this.state.failed ? <StaticGlow variant="hero" /> : this.props.children; }
+  componentDidCatch() { /* swallow — the black panel carries the hero */ }
+  render() { return this.state.failed ? null : this.props.children; }
 }
 
-// Cool, single-source static fallback — never the blotchy multi-radial blob.
+// HeroScene — UNWIRED (kept for cheap reversal): the robot now sits on pure
+// black per the original splite demo; the spindle/ember layer (lib/Ambient.jsx)
+// stays on disk. To restore, delete the early `return null`.
+function HeroScene() {
+  return null;
+  // eslint-disable-next-line no-unreachable
+  if (REDUCED || LOW_POWER) return null;
+  return (
+    <HeroErrorBoundary>
+      <Suspense fallback={null}>
+        <Ambient status="ok" />
+      </Suspense>
+    </HeroErrorBoundary>
+  );
+}
+
+// Single-source ambient glow behind the shell — a faint overhead light that lifts
+// the canvas off pure black. MONOCHROME (white at low alpha), pointer-transparent.
 function StaticGlow({ variant = "ambient" }) {
   const bg = variant === "hero"
-    ? "radial-gradient(58% 52% at 66% 32%, rgba(96,165,250,0.14), transparent 70%), radial-gradient(48% 44% at 14% 98%, rgba(120,138,180,0.06), transparent 72%)"
-    : "radial-gradient(46% 42% at 84% 18%, rgba(96,165,250,0.08), transparent 72%)";
+    ? "radial-gradient(58% 52% at 66% 32%, rgba(255,255,255,0.05), transparent 70%), radial-gradient(48% 44% at 14% 98%, rgba(255,255,255,0.025), transparent 72%)"
+    : "radial-gradient(46% 42% at 84% 18%, rgba(255,255,255,0.035), transparent 72%)";
   return <div className={`${variant === "hero" ? "absolute" : "fixed"} inset-0 pointer-events-none`} style={{ zIndex: 0, background: bg }} aria-hidden="true" />;
-}
-
-// Live prefers-reduced-motion — re-renders into the static fallback the instant
-// the OS setting flips (not a one-shot read at module load).
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(REDUCED);
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const on = () => setReduced(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return reduced;
 }
 
 const SHIFTS = [
@@ -104,7 +88,9 @@ const STATUS = {
 const levelForPct = (p) => (p >= 100 ? "ok" : p >= 80 ? "warn" : "bad");
 const levelForPace = (pace) => (pace >= 0.97 ? "ok" : pace >= 0.85 ? "warn" : "bad");
 // brand accent = white (mono) — live trend dot/glow + zero rail.
-const HEX = { brand: "#FAFAFA", grid: "rgba(255,255,255,0.07)", ghost: "rgba(255,255,255,0.12)", axis: "#71717A", axis2: "#A1A1AA" };
+// axis lifted #71717A→#8A8A94 so 11px chart tick labels clear WCAG AA (matches the
+// ink.dim token fix). All values monochrome — charts encode urgency via brightness.
+const HEX = { brand: "#FAFAFA", grid: "rgba(255,255,255,0.07)", ghost: "rgba(255,255,255,0.12)", axis: "#8A8A94", axis2: "#A1A1AA" };
 // Bespoke chart tooltip — a matte spec-card with a brand left-rule echoing the
 // dashboard status rail. No drop shadow (the system is flat, not floating-glass).
 function ChartTip({ active, payload, label, unit = "units" }) {
@@ -152,17 +138,21 @@ const spotlightMove = (e) => {
   e.currentTarget.style.setProperty("--my", `${e.clientY - r.top}px`);
 };
 const containerV = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
-const itemV = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } } };
+const itemV = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: tween(dur.hero, ease.emphasis) } };
+// Directional view swap — content slides FROM the side the new tab sits on
+// (matching the tubelight lamp's travel), exits run 20% faster via exitTween.
+const viewV = {
+  enter: (d) => ({ opacity: 0, x: 26 * d, y: 4 }),
+  center: { opacity: 1, x: 0, y: 0, transition: tween(dur.page) },
+  exit: (d) => ({ opacity: 0, x: -20 * d, y: 0, transition: exitTween(dur.page) }),
+};
 
-// Count-up via MotionValue — animates without re-rendering (no stagger conflict).
+// Live numeral — NumberFlow digit-roll (odometer): each digit spins to its new
+// value, trend=+1 so production counts always roll UPWARD (semantically right for
+// output). Respects prefers-reduced-motion natively; on very old Chrome (<125,
+// no CSS mod()) it renders a static number — graceful.
 function AnimatedNumber({ value }) {
-  const mv = useMotionValue(0);
-  const text = useTransform(mv, (v) => Math.round(v).toLocaleString());
-  useEffect(() => {
-    const controls = animate(mv, Number(value) || 0, { duration: 0.9, ease: [0.22, 1, 0.36, 1] });
-    return () => controls.stop();
-  }, [value]);
-  return <m.span>{text}</m.span>;
+  return <NumberFlow value={Number(value) || 0} trend={+1} />;
 }
 
 // Brand is carried by the Archivo wordmark — no symbol/gem (those read AI).
@@ -179,26 +169,6 @@ const Wordmark = ({ size = "sm" }) => (
 const Eyebrow = ({ children, className = "" }) => (
   <div className={`font-mono text-[11px] tracking-[0.2em] uppercase text-ink-soft ${className}`}>{children}</div>
 );
-
-// Per-letter staggered reveal (one-shot on mount). aria-label carries the real
-// text; the animated letters are aria-hidden. Falls back to static under reduced-motion.
-function SplitReveal({ lines, className = "" }) {
-  const reduced = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reduced) return <span className={className}>{lines.map((l, i) => <span key={i} className="block">{l}</span>)}</span>;
-  const container = { hidden: {}, show: { transition: { staggerChildren: 0.035, delayChildren: 0.12 } } };
-  const letter = { hidden: { y: "0.5em", opacity: 0, filter: "blur(6px)" }, show: { y: 0, opacity: 1, filter: "blur(0px)", transition: { type: "spring", stiffness: 300, damping: 24 } } };
-  return (
-    <m.span variants={container} initial="hidden" animate="show" aria-hidden="true" className={className}>
-      {lines.map((line, li) => (
-        <span key={li} className="block">
-          {line.split("").map((ch, i) => (
-            <m.span key={i} variants={letter} className="inline-block whitespace-pre">{ch}</m.span>
-          ))}
-        </span>
-      ))}
-    </m.span>
-  );
-}
 
 function StatusPill({ level, label, size = "md" }) {
   const s = STATUS[level];
@@ -250,7 +220,7 @@ function makeDevLabel(data) {
     if (!d || d.pct >= 100) return null;        // misses only — they extend left of the rail
     return (                                     // label sits in the empty right half, never clipping
       <text x={x + width + 9} y={y + height / 2} textAnchor="start" dominantBaseline="central"
-        fontFamily="'IBM Plex Mono', ui-monospace, monospace" fontSize="10.5" fontWeight="600"
+        fontFamily="'JetBrains Mono', ui-monospace, monospace" fontSize="10.5" fontWeight="600"
         fill={STATUS[levelForPct(d.pct)].hex}>
         {d.dev > 0 ? "+" : "−"}{Math.abs(d.dev).toLocaleString()} · {d.pct}%
       </text>
@@ -297,6 +267,30 @@ function CompTip({ active, payload }) {
 
 /* ============================================================================ */
 // PROD SAFETY screen — shown when a production build has no Supabase config, so the
+// Post-login skeleton — geometry-matched shimmer blocks shown between "signed in"
+// and "first data fetch landed", killing the 0-value/"No data" flash. The shimmer
+// is a transform-only light sweep (compositor-cheap), motion-safe gated.
+const Sk = ({ className = "" }) => (
+  <div className={`relative overflow-hidden rounded-xl bg-panel border border-hair ${className}`}>
+    <div className="absolute inset-0 motion-safe:[animation:shimmer_1.6s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-white/[0.04] to-transparent" />
+  </div>
+);
+function ViewSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Loading data" role="status">
+      <Sk className="h-9 w-64 mb-7" />
+      <Sk className="h-28 mb-4" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        {[0, 1, 2, 3].map((i) => <Sk key={i} className="h-32" />)}
+      </div>
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Sk className="h-72" />
+        <Sk className="h-72" />
+      </div>
+    </div>
+  );
+}
+
 // app never silently serves demo data to real users.
 function ConfigError() {
   return (
@@ -320,6 +314,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [view, setView] = useState("dashboard");
   const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [], settings: {} });
+  const [dataReady, setDataReady] = useState(false); // first post-login fetch landed → swap skeleton for real panels
+  const [dir, setDir] = useState(1); // view-swap slide direction (sign of tab-index delta)
   const [live, setLive] = useState(false); // realtime connection state (supabase mode)
 
   useEffect(() => { (async () => { if (CONFIG_ERROR) { setBooting(false); return; } await seedIfEmpty(); setBooting(false); })(); }, []);
@@ -330,8 +326,8 @@ export default function App() {
     setData({ components, machines, plans, entries, operations, machinePlan, settings });
   }, []);
 
-  const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); await loadData(); };
-  const logout = async () => { try { await db.signOut(); } catch { /* ignore */ } setUser(null); setView("dashboard"); };
+  const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); await loadData(); setDataReady(true); };
+  const logout = async () => { try { await db.signOut(); } catch { /* ignore */ } setUser(null); setView("dashboard"); setDataReady(false); };
 
   // LIVE SYNC — once signed in, refresh (debounced) whenever anyone logs output
   // or changes a plan/component on any device. RLS keeps each client's data
@@ -376,17 +372,23 @@ export default function App() {
       ].filter((t) => t.roles.includes(user.role))
     : [];
   const activeTabName = (navTabs.find((t) => t.id === view) || navTabs[0] || {}).name;
+  // setView with direction: content slides in from the side the new tab sits on.
+  const go = (id) => {
+    const ids = navTabs.map((t) => t.id);
+    setDir(ids.indexOf(id) >= ids.indexOf(view) ? 1 : -1);
+    setView(id);
+  };
   return (
     <AnimatePresence mode="wait">
       {!user ? (
-        <m.div key="login" exit={{ opacity: 0, filter: "blur(8px)" }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
+        <m.div key="login" exit={{ opacity: 0, filter: "blur(8px)" }} transition={exitTween(dur.hero)}>
           <LoginScreen onLogin={onLogin} />
         </m.div>
       ) : (
-        <m.div key="app" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="min-h-[100dvh] text-ink relative">
+        <m.div key="app" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={tween(dur.hero)} className="min-h-[100dvh] text-ink relative">
           {/* Tubelight nav (replaces the sidebar — user's pick): floating pill,
               top-center on desktop, bottom thumb-bar on phones. */}
-          <NavBar items={navTabs} activeTab={activeTabName} onItemClick={(t) => setView(t.id)} />
+          <NavBar items={navTabs} activeTab={activeTabName} onItemClick={(t) => go(t.id)} />
           {/* Slim fixed header: wordmark left (layoutId flight target from the
               login lockup) + live status, user, logout right. */}
           <header className="fixed top-0 inset-x-0 z-40 h-16 px-4 sm:px-6 flex items-center justify-between pointer-events-none bg-base/80 backdrop-blur-md border-b border-hair/60">
@@ -402,15 +404,19 @@ export default function App() {
               <button onClick={logout} title="Log out" aria-label="Log out" className="p-2.5 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-ink transition shrink-0"><LogOut size={18} /></button>
             </div>
           </header>
-          <div className="pt-20 pb-28 sm:pb-0">
+          <div className="pt-20 pb-28 lg:pb-0">
             <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
-              <AnimatePresence mode="wait">
-                <m.div key={view} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}>
-                  {view === "dashboard" && <Dashboard data={data} live={live} setView={setView} />}
-                  {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
-                  {view === "plan" && <PlanSetup data={data} reload={loadData} />}
-                  {view === "loading" && <MachineLoading data={data} reload={loadData} />}
-                  {view === "team" && <TeamAdmin user={user} />}
+              <AnimatePresence mode="wait" custom={dir}>
+                <m.div key={dataReady ? view : "skeleton"} custom={dir} variants={viewV} initial="enter" animate="center" exit="exit">
+                  {!dataReady ? <ViewSkeleton /> : (
+                    <>
+                      {view === "dashboard" && <Dashboard data={data} live={live} setView={go} />}
+                      {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
+                      {view === "plan" && <PlanSetup data={data} reload={loadData} />}
+                      {view === "loading" && <MachineLoading data={data} reload={loadData} />}
+                      {view === "team" && <TeamAdmin user={user} />}
+                    </>
+                  )}
                 </m.div>
               </AnimatePresence>
             </main>
@@ -451,7 +457,7 @@ function LoginScreen({ onLogin }) {
   // Solid keys — flat fills, hairline borders, tactile press. No glass, no glow.
   const Key = ({ children, onClick, variant, label, disabled }) => (
     <m.button onClick={onClick} disabled={disabled} aria-label={label}
-      whileTap={disabled ? undefined : { scale: 0.95 }} transition={{ type: "spring", stiffness: 400, damping: 25, mass: 0.6 }}
+      whileTap={disabled ? undefined : { scale: 0.95 }} transition={spring.tap}
       className={`h-16 rounded-xl grid place-items-center text-2xl font-semibold transition-[filter,transform] duration-200 disabled:opacity-50 disabled:pointer-events-none ${
         variant === "go" ? "bg-gradient-to-b from-brand-300 to-brand-500 text-zinc-900 border-b-2 border-brand-700/70 ring-1 ring-inset ring-white/20 shadow-[0_4px_14px_-3px_rgba(0,0,0,0.55)] hover:brightness-110 active:brightness-95"
         : variant === "back" ? "bg-gradient-to-b from-inset to-[#1c1c21] border border-b-2 border-black/40 ring-1 ring-inset ring-white/[0.06] text-ink-soft hover:text-ink hover:brightness-115"
@@ -462,17 +468,18 @@ function LoginScreen({ onLogin }) {
 
   return (
     <ScrollExpandMedia
-      mediaSrc={HERO_MEDIA}
-      bgImageSrc={HERO_BG}
       title="PRANA VENTURE"
       date="Production Console"
-      scrollToExpand="Scroll · or tap the image to enter"
-      enterLabel="Enter Console"
+      scene={<HeroScene />}
     >
-      {/* etheral-shadow smoke fills the revealed section behind the sign-in card
-          (gray on black — already monochrome; reduced-motion renders it static) */}
-      <div className="absolute inset-0" aria-hidden="true">
-        <EtheralShadow color="rgba(128, 128, 128, 1)" animation={{ scale: 100, speed: 90 }} noise={{ opacity: 1, scale: 1.2 }} sizing="fill" />
+      {/* Monochrome drift-smoke behind the sign-in card — two soft radial blobs
+          that slowly drift via TRANSFORM only (compositor-cheap, no SVG filter, no
+          external CDN). motion-safe → static under reduced-motion. */}
+      <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute -inset-[20%] will-change-transform motion-safe:[animation:smoke-a_22s_ease-in-out_infinite]"
+          style={{ background: "radial-gradient(40% 40% at 35% 45%, rgba(255,255,255,0.05), transparent 70%)" }} />
+        <div className="absolute -inset-[20%] will-change-transform motion-safe:[animation:smoke-b_28s_ease-in-out_infinite]"
+          style={{ background: "radial-gradient(45% 45% at 65% 55%, rgba(255,255,255,0.04), transparent 72%)" }} />
       </div>
       {/* sign-in revealed once the hero media fully expands */}
       <m.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
@@ -491,19 +498,25 @@ function LoginScreen({ onLogin }) {
           {/* segmented toggle — sliding indicator */}
           <div className="relative grid grid-cols-2 p-1 rounded-xl bg-inset border border-hair mb-6">
             <m.div className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-lg bg-brand-500"
-              animate={{ x: mode === "operator" ? 0 : "100%" }} transition={{ type: "spring", stiffness: 380, damping: 32 }} />
+              animate={{ x: mode === "operator" ? 0 : "100%" }} transition={spring.nav} />
             {modes.map(([id, label]) => (
               <button key={id} onClick={() => { setMode(id); setErr(""); }} aria-pressed={mode === id} className={`relative z-10 min-h-[44px] py-3 rounded-lg text-sm font-semibold transition-colors ${mode === id ? "text-zinc-900" : "text-ink-soft hover:text-ink"}`}>{label}</button>
             ))}
           </div>
 
+          {/* error ABOVE the forms — at the card's bottom it fell below the fold
+              on short viewports, so a wrong PIN looked like a silent clear */}
+          <AnimatePresence>
+            {err && <m.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: dur.pop, ease: ease.out }}><div role="alert" className={`${errCls} mb-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></m.div>}
+          </AnimatePresence>
+
           <AnimatePresence mode="wait">
             {mode === "operator" ? (
-              <m.div key="op" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={{ duration: 0.22 }}>
+              <m.div key="op" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8, transition: exitTween(dur.pop) }} transition={tween(dur.pop)}>
                 <div className={labelCls}>PIN</div>
                 <div role="status" aria-live="polite" aria-label={pin.length ? `${pin.length} digit${pin.length === 1 ? "" : "s"} entered` : "PIN empty"} className="h-14 mb-4 rounded-xl bg-inset border border-hair flex items-center justify-center gap-3">
                   {pin.length === 0 ? <span className="font-mono text-ink-dim text-[11px] uppercase tracking-[0.28em]">Enter PIN</span> :
-                    pin.split("").map((_, i) => <m.span key={i} initial={{ scale: 0.2, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 500, damping: 28 }} className="w-3 h-3 rounded-full bg-brand-400" />)}
+                    pin.split("").map((_, i) => <m.span key={i} initial={{ scale: 0.2, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={spring.pop} className="w-3 h-3 rounded-full bg-brand-400" />)}
                 </div>
                 <div className="grid grid-cols-3 gap-2.5">
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => <Key key={n} onClick={() => press(String(n))}>{n}</Key>)}
@@ -513,7 +526,7 @@ function LoginScreen({ onLogin }) {
                 </div>
               </m.div>
             ) : (
-              <m.div key="mgr" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={{ duration: 0.22 }}>
+              <m.div key="mgr" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8, transition: exitTween(dur.pop) }} transition={tween(dur.pop)}>
                 <form onSubmit={(e) => { e.preventDefault(); credLogin(); }} className="space-y-4">
                   <div>
                     <label htmlFor="login-username" className={labelCls}>Username</label>
@@ -532,10 +545,6 @@ function LoginScreen({ onLogin }) {
                 </form>
               </m.div>
             )}
-          </AnimatePresence>
-
-          <AnimatePresence>
-            {err && <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div role="alert" className={`${errCls} mt-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></m.div>}
           </AnimatePresence>
 
           {MODE === "local" && (
@@ -575,7 +584,7 @@ function Sidebar({ user, view, setView, logout, status, live }) {
           return (
             <button key={t.id} onClick={() => setView(t.id)} aria-current={a ? "page" : undefined} title={t.label}
               className={`relative w-full flex items-center justify-center lg:justify-start gap-3 min-h-[48px] px-0 lg:px-3 rounded-lg text-sm font-semibold transition ${a ? "bg-brand-500/[0.10] text-brand-200" : "text-ink-soft hover:text-ink hover:bg-white/[0.04]"}`}>
-              {a && <m.span layoutId="navrail" className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-brand-500" transition={{ type: "spring", stiffness: 380, damping: 32 }} />}
+              {a && <m.span layoutId="navrail" className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-brand-500" transition={spring.nav} />}
               <Icon size={20} weight={a ? "fill" : "bold"} className="shrink-0" />
               <span className="hidden lg:block">{t.label}</span>
             </button>
@@ -693,7 +702,7 @@ function Dashboard({ data, live }) {
           </div>
         </div>
         <div className="relative h-1.5 bg-inset">
-          <m.div initial={{ width: 0 }} animate={{ width: `${Math.min(monthlyPct, 100)}%` }} transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }} className="h-full" style={{ background: STATUS[lvl].hex }} />
+          <m.div initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.85, ease: ease.out }} className="h-full origin-left" style={{ width: `${Math.min(monthlyPct, 100)}%`, background: STATUS[lvl].hex }} />
           {[25, 50, 75].map((t) => <span key={t} className="absolute top-0 bottom-0 w-px bg-base/70" style={{ left: `${t}%` }} />)}
         </div>
       </div>
@@ -733,9 +742,9 @@ function Dashboard({ data, live }) {
                 <CartesianGrid strokeDasharray="2 6" stroke={HEX.grid} horizontal={false} />
                 <XAxis type="number" domain={[-maxDev, maxDev]} tick={{ fill: HEX.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => (v > 0 ? `+${v}` : v)} height={22} />
                 <YAxis type="category" dataKey="name" width={108} tick={{ fill: HEX.axis2, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
-                <Tooltip content={<CompTip />} cursor={{ fill: "rgba(96,165,250,0.05)" }} />
+                <Tooltip content={<CompTip />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
                 <ReferenceLine x={0} stroke={HEX.brand} strokeOpacity={0.55} strokeDasharray="3 3" />
-                <Bar dataKey="dev" barSize={16} shape={<DevBar />} isAnimationActive={!REDUCED}>
+                <Bar dataKey="dev" barSize={16} shape={<DevBar />} isAnimationActive={!REDUCED} animationDuration={700} animationEasing="ease-out">
                   <LabelList content={makeDevLabel(compData)} />
                 </Bar>
               </BarChart>
@@ -748,7 +757,8 @@ function Dashboard({ data, live }) {
             <ResponsiveContainer width="100%" height={280}>
               <AreaChart data={trend} margin={{ top: 8, right: 12, left: -14, bottom: 0 }}>
                 <defs>
-                  {/* split the line + fill at the daily-target line: green above, amber below */}
+                  {/* split the line + fill at the daily-target line: brighter (on-pace)
+                      above, dimmer (behind) below — monochrome, brightness = urgency */}
                   <linearGradient id="splitStroke" x1="0" y1="0" x2="0" y2="1">
                     <stop offset={0} stopColor={STATUS.ok.hex} />
                     <stop offset={splitOff} stopColor={STATUS.ok.hex} />
@@ -770,7 +780,7 @@ function Dashboard({ data, live }) {
                 <YAxis domain={[0, trendDomainMax]} allowDecimals={false} tick={{ fill: HEX.axis, fontSize: 12 }} axisLine={false} tickLine={false} width={34} />
                 <Tooltip content={<ChartTip />} cursor={{ stroke: HEX.axis2, strokeDasharray: "4 4", strokeWidth: 1 }} />
                 <ReferenceLine y={dailyTargetRounded} stroke={HEX.axis2} strokeDasharray="5 5" label={{ value: "daily target", fill: HEX.axis2, fontSize: 10, position: "insideTopRight" }} />
-                <Area type="stepAfter" dataKey="actual" name="Output" stroke="url(#splitStroke)" strokeWidth={2.25} fill="url(#splitFill)" style={{ filter: "url(#trendGlow)" }} dot={false} isAnimationActive={!REDUCED} activeDot={{ r: 4, fill: HEX.brand, stroke: "#0A0A0A", strokeWidth: 2 }} />
+                <Area type="stepAfter" dataKey="actual" name="Output" stroke="url(#splitStroke)" strokeWidth={2.25} fill="url(#splitFill)" style={{ filter: "url(#trendGlow)" }} dot={false} isAnimationActive={!REDUCED} animationDuration={700} animationEasing="ease-out" activeDot={{ r: 4, fill: HEX.brand, stroke: "#0A0A0A", strokeWidth: 2 }} />
                 {/* clean overlay carries only the live "now" pulse dot (no glow on it) */}
                 <Area type="stepAfter" dataKey="actual" stroke="none" fill="none" legendType="none" tooltipType="none" isAnimationActive={false} activeDot={false} dot={<PulseDot dataLen={trend.length} />} />
               </AreaChart>
@@ -882,13 +892,13 @@ function Dashboard({ data, live }) {
               {fleet.map((f) => {
                 const bar = f.pct > 100 ? "bg-bad" : f.pct >= 85 ? "bg-warn" : f.planned ? "bg-ok" : "bg-over";
                 return (
-                  <div key={f.m.id} className="rounded-lg bg-inset/40 border border-hair p-2.5">
+                  <div key={f.m.id} className={`rounded-lg bg-inset/40 border p-2.5 ${f.pct > 100 ? "border-beam-alert border-hair-strong" : "border-hair"}`}>
                     <div className="font-semibold text-[12px] text-ink truncate">{f.m.name}</div>
                     <div className="flex items-baseline justify-between mt-1">
                       <span className={`font-mono text-[11px] ${f.pct > 100 ? "text-bad-ink" : "text-ink-dim"}`}>{f.planned ? `${f.pct}%` : "idle"}</span>
                       <span className="font-mono text-[11px] text-ink-soft">{f.out} pcs</span>
                     </div>
-                    <div className="mt-1 h-1 rounded-full bg-over overflow-hidden"><div className={`h-full ${bar}`} style={{ width: `${Math.min(f.pct, 100)}%` }} /></div>
+                    <div className="mt-1 h-1 rounded-full bg-over overflow-hidden"><div className={`h-full origin-left transition-transform duration-700 ease-out ${bar}`} style={{ transform: `scaleX(${Math.min(f.pct, 100) / 100})` }} /></div>
                   </div>
                 );
               })}
@@ -915,6 +925,7 @@ function ShiftEntry({ data, user, reload }) {
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [pending, setPending] = useState([]); // optimistic rows awaiting server ack
   const [delEntry, setDelEntry] = useState(null); // entry pending delete-confirm
   const [delBusy, setDelBusy] = useState(false);
 
@@ -950,20 +961,36 @@ function ShiftEntry({ data, user, reload }) {
 
   const closeConfirm = () => { setConfirm(false); setError(""); };
   const open = () => { if (componentId && qty >= 0) { setError(""); setConfirm(true); } };
-  const doSave = async () => {
+  // OPTIMISTIC SAVE — the operator's acknowledgment must land ≤100ms (NN/g direct-
+  // manipulation threshold), so the row, toast and haptic fire IMMEDIATELY and the
+  // server reconciles in the background. On rejection the optimistic row is pulled,
+  // the form values are RESTORED, and the dialog reopens with the error.
+  const doSave = () => {
     if (saving) return; // guard against a double-tap firing addEntry twice
+    const entry = { production_date: date, shift, component_id: componentId, machine_id: machineId || null, operator_id: user.id, quantity: Number(qty), scrap_qty: Number(scrap), notes: notes.trim() };
+    const tempId = `tmp-${Date.now()}`;
     setSaving(true);
-    try {
-      await db.addEntry({ production_date: date, shift, component_id: componentId, machine_id: machineId || null, operator_id: user.id, quantity: Number(qty), scrap_qty: Number(scrap), notes: notes.trim() });
-    } catch (e) {
-      setError(e?.message || "Could not save this entry. Please try again.");
-      setSaving(false);
-      return;
-    }
+    setPending((p) => [{ ...entry, id: tempId, created_at: Date.now() }, ...p]);
     setError(""); setConfirm(false); setQty(0); setScrap(0); setNotes("");
-    setToast(`Recorded ${compName(componentId)} · Shift ${shift}`); setTimeout(() => setToast(""), 2200);
-    await reload();
-    setSaving(false);
+    setToast(`Recorded ${compName(entry.component_id)} · Shift ${entry.shift}`);
+    setTimeout(() => setToast(""), 2200);
+    if (navigator.vibrate) { try { navigator.vibrate(10); } catch { /* blocked — fine */ } }
+    (async () => {
+      try {
+        await db.addEntry(entry);
+        await reload();
+        setPending((p) => p.filter((x) => x.id !== tempId));
+      } catch (e) {
+        // rollback: pull the optimistic row, put the values back, surface the error
+        setPending((p) => p.filter((x) => x.id !== tempId));
+        setToast("");
+        setQty(entry.quantity); setScrap(entry.scrap_qty); setNotes(entry.notes);
+        setError(e?.message || "Could not save this entry. Please try again.");
+        setConfirm(true);
+      } finally {
+        setSaving(false);
+      }
+    })();
   };
 
   // Destructive: only runs after the focus-trapped ConfirmDialog is confirmed.
@@ -977,17 +1004,17 @@ function ShiftEntry({ data, user, reload }) {
 
   let recent = [...entries].sort((a, b) => b.created_at - a.created_at);
   if (!isManager) recent = recent.filter((e) => e.operator_id === user.id);
-  recent = recent.slice(0, 9);
+  recent = [...pending, ...recent].slice(0, 9); // optimistic rows lead until acked
 
   const Stepper = ({ value, set }) => (
     <div className="flex items-center gap-3">
-      <button onClick={() => set(Math.max(0, value - 1))} aria-label="Decrease" className="w-16 h-16 rounded-xl grid place-items-center active:scale-95 transition border border-hair bg-inset text-ink hover:border-brand-500/55 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"><Minus size={24} /></button>
+      <button onClick={() => set(Math.max(0, value - 1))} aria-label="Decrease" className="w-16 h-16 rounded-xl grid place-items-center active:scale-95 transition ease-spring-out border border-hair bg-inset text-ink hover:border-brand-500/55 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"><Minus size={24} /></button>
       <input type="number" min="0" value={value} onChange={(e) => set(Math.max(0, parseInt(e.target.value, 10) || 0))} className="w-24 text-center font-mono text-4xl font-bold tnum bg-inset border border-hair rounded-xl py-2 text-ink focus:border-brand-500 outline-none transition" />
-      <button onClick={() => set(value + 1)} aria-label="Increase" className="w-16 h-16 rounded-xl grid place-items-center active:scale-95 transition border border-hair bg-inset text-ink hover:border-brand-500/55 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"><Plus size={24} /></button>
+      <button onClick={() => set(value + 1)} aria-label="Increase" className="w-16 h-16 rounded-xl grid place-items-center active:scale-95 transition ease-spring-out border border-hair bg-inset text-ink hover:border-brand-500/55 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"><Plus size={24} /></button>
     </div>
   );
 
-  const chip = (active) => active ? "border-brand-500 bg-brand-500/[0.10] text-brand-200 ring-1 ring-brand-500/30" : "border-hair bg-inset text-ink-soft hover:border-brand-500/40";
+  const chip = (active) => `ease-spring-out ${active ? "border-brand-500 bg-brand-500/[0.10] text-brand-200 ring-1 ring-brand-500/30" : "border-hair bg-inset text-ink-soft hover:border-brand-500/40"}`;
 
   return (
     <>
@@ -1042,21 +1069,25 @@ function ShiftEntry({ data, user, reload }) {
         <Panel title={isManager ? "Recent Entries (all operators)" : "My Recent Entries"} tag="LOG" className="lg:col-span-5">
           {recent.length === 0 && <Empty msg="No entries yet — log your first one." />}
           <div className="space-y-2">
-            {recent.map((e) => (
-              <div key={e.id} className="flex items-center justify-between px-3.5 py-3 bg-inset border border-hair rounded-xl">
-                <div className="min-w-0">
-                  <div className="font-semibold text-sm text-ink truncate">{compName(e.component_id)}</div>
-                  <div className="font-mono text-[11px] text-ink-dim tnum mt-0.5">{e.production_date} · Shift {e.shift} · {machName(e.machine_id)}{e.scrap_qty ? ` · ${e.scrap_qty} scrap` : ""}{e.notes ? " · note" : ""}</div>
-                </div>
-                <div className="flex items-center gap-2.5 shrink-0">
-                  <div className="text-right tabular-nums">
-                    <div className="font-mono font-bold text-[19px] tnum text-ink leading-none">{e.quantity}</div>
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-ink-dim mt-1">units</div>
+            {recent.map((e) => {
+              const isPending = String(e.id).startsWith("tmp-");
+              return (
+                <div key={e.id} className={`flex items-center justify-between px-3.5 py-3 bg-inset border rounded-xl ${isPending ? "border-hair-strong" : "border-hair"}`}>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-sm text-ink truncate">{compName(e.component_id)}</div>
+                    <div className="font-mono text-[11px] text-ink-dim tnum mt-0.5">{e.production_date} · Shift {e.shift} · {machName(e.machine_id)}{e.scrap_qty ? ` · ${e.scrap_qty} scrap` : ""}{e.notes ? " · note" : ""}</div>
                   </div>
-                  {isManager && <button onClick={() => setDelEntry(e)} aria-label="Delete entry" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button>}
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <div className="text-right tabular-nums">
+                      <div className="font-mono font-bold text-[19px] tnum text-ink leading-none">{e.quantity}</div>
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-ink-dim mt-1">units</div>
+                    </div>
+                    {isPending && <span className="relative flex h-1.5 w-1.5 mr-1" title="Syncing…" aria-label="Syncing"><span className="absolute inline-flex h-full w-full rounded-full bg-ink-soft motion-safe:animate-ping opacity-60" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ink-soft" /></span>}
+                    {isManager && !isPending && <button onClick={() => setDelEntry(e)} aria-label="Delete entry" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           {!isManager && <div className={`${hintCls} mt-3`}><ShieldCheck size={14} className="shrink-0 mt-0.5 text-ink-dim" /><span>Only a supervisor can edit or delete entries.</span></div>}
         </Panel>
@@ -1065,7 +1096,7 @@ function ShiftEntry({ data, user, reload }) {
       <AnimatePresence>
         {confirm && (
           <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-base/85 p-4" onClick={closeConfirm}>
-            <m.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ type: "spring", stiffness: 360, damping: 30 }} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
+            <m.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10, transition: exitTween(dur.modal) }} transition={spring.modal} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4"><h3 id="confirm-title" className="font-display font-bold text-lg">Confirm entry</h3><button onClick={closeConfirm} aria-label="Close" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06]"><X size={18} /></button></div>
               <div className="space-y-2.5 mb-5">
                 {[["Date", date], ["Shift", `Shift ${shift}`], ["Component", compName(componentId)], ["Machine", machName(machineId)], ["Quantity", `${qty} units`], ["Scrap", `${scrap} units`]].map(([k, v]) => (
@@ -1076,8 +1107,8 @@ function ShiftEntry({ data, user, reload }) {
               {dup && <div className={`${warnCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>A matching entry already exists for this shift. Confirm only if this is additional output.</span></div>}
               {error && <div className={`${errCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>{error}</span></div>}
               <div className="flex gap-3">
-                <m.button onClick={closeConfirm} disabled={saving} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 420, damping: 26, mass: 0.6 }} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</m.button>
-                <m.button onClick={doSave} disabled={saving} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 420, damping: 26, mass: 0.6 }} className="flex-1 py-3.5 rounded-lg bg-gradient-to-b from-brand-300 to-brand-500 text-zinc-900 border-b-2 border-brand-700/70 ring-1 ring-inset ring-white/20 hover:brightness-110 active:brightness-95 font-semibold transition flex items-center justify-center gap-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{saving ? "Saving…" : <><Check size={18} /> Confirm</>}</m.button>
+                <m.button onClick={closeConfirm} disabled={saving} whileTap={{ scale: 0.97 }} transition={spring.tap} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</m.button>
+                <m.button onClick={doSave} disabled={saving} whileTap={{ scale: 0.97 }} transition={spring.tap} className="flex-1 py-3.5 rounded-lg bg-gradient-to-b from-brand-300 to-brand-500 text-zinc-900 border-b-2 border-brand-700/70 ring-1 ring-inset ring-white/20 hover:brightness-110 active:brightness-95 font-semibold transition flex items-center justify-center gap-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] disabled:opacity-60 disabled:cursor-not-allowed">{saving ? "Saving…" : <><Check size={18} /> Confirm</>}</m.button>
               </div>
             </m.div>
           </m.div>
@@ -1086,8 +1117,14 @@ function ShiftEntry({ data, user, reload }) {
 
       <AnimatePresence>
         {toast && (
-          <m.div role="status" aria-live="polite" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} className="fixed bottom-5 right-5 z-50 bg-coal border border-hair rounded-[8px] shadow-pop px-4 py-3 flex items-center gap-3">
-            <span className="w-5 h-5 rounded-full bg-ok grid place-items-center shrink-0"><Check size={13} className="text-[#0A0A0A]" /></span>
+          <m.div role="status" aria-live="polite" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} transition={spring.pop} className="fixed bottom-5 right-5 z-50 bg-coal border border-hair rounded-[8px] shadow-pop px-4 py-3 flex items-center gap-3">
+            <span className="w-5 h-5 rounded-full bg-ok grid place-items-center shrink-0">
+              {/* drawn-on check — the "it landed" moment */}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <m.path d="M4.5 12.5l5 5L19.5 7" stroke="#0A0A0A" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"
+                  initial={REDUCED ? false : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.32, ease: ease.out }} />
+              </svg>
+            </span>
             <div>
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">Logged</div>
               <div className="text-ink font-semibold text-sm">{toast}</div>
@@ -1185,7 +1222,7 @@ function TeamAdmin({ user }) {
       <PageHead title="Team" sub="Add operators and managers · PINs and passwords are generated and shown once" />
 
       <div className="my-6"><AnimatePresence>{created && <CredentialReveal created={created} onClose={() => setCreated(null)} />}</AnimatePresence>
-        <AnimatePresence>{err && <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div role="alert" className={`${errCls} mb-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></m.div>}</AnimatePresence>
+        <AnimatePresence>{err && <m.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: dur.pop, ease: ease.out }}><div role="alert" className={`${errCls} mb-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></m.div>}</AnimatePresence>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Panel title="Add Operator" tag="01">
@@ -1355,7 +1392,7 @@ function MachinePlanVsActual({ machine, lines, operations, components, entries }
                   <td className="py-2.5 px-2 text-right font-mono text-ink-dim tnum">{a.scrap || "—"}</td>
                   <td className="py-2.5 px-2">
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 h-2 rounded-full bg-over overflow-hidden"><div className={`h-full ${tone.split(" ")[0]}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
+                      <div className="flex-1 h-2 rounded-full bg-over overflow-hidden"><div className={`h-full origin-left transition-transform duration-700 ease-out ${tone.split(" ")[0]}`} style={{ transform: `scaleX(${Math.min(pct, 100) / 100})` }} /></div>
                       <span className={`font-mono text-xs font-bold tnum ${tone.split(" ")[1]}`}>{pct}%</span>
                     </div>
                   </td>
@@ -1472,7 +1509,7 @@ function MachineSchedule({ machine, lines, operations, components }) {
             <div key={i} className="flex items-center gap-3">
               <div className="w-40 shrink-0 truncate text-[12px]"><span className="font-semibold text-ink">{nameOf(r.component_id)}</span> <span className="font-mono text-ink-dim">op{r.op_no}</span></div>
               <div className="relative flex-1 h-6 rounded bg-inset/60 overflow-hidden">
-                <div className="absolute top-0 h-full rounded bg-gradient-to-r from-brand-500/70 to-brand-400/60 border border-brand-400/40" style={{ left: `${Math.min(left, 98)}%`, width: `${Math.min(width, 100 - Math.min(left, 98))}%` }} title={`${fmtDate(r.start)} → ${fmtDate(r.end)} · ${round1(r.days)}d`} />
+                <div className="absolute top-0 h-full rounded bg-gradient-to-r from-brand-500/70 to-brand-400/60 border border-brand-400/40 transition-[left,width] duration-500 ease-out" style={{ left: `${Math.min(left, 98)}%`, width: `${Math.min(width, 100 - Math.min(left, 98))}%` }} title={`${fmtDate(r.start)} → ${fmtDate(r.end)} · ${round1(r.days)}d`} />
               </div>
               <div className="w-32 shrink-0 text-right font-mono text-[11px] text-ink-soft tnum">{fmtDate(r.start)}→{fmtDate(r.end)}</div>
             </div>
@@ -1552,7 +1589,7 @@ function MachineLoading({ data, reload }) {
               <button key={m.id} onClick={() => setSelId(m.id)} className={`text-left rounded-lg border ${m.id === sel.id ? "border-brand-500 bg-brand-500/[0.06]" : tone.ring + " bg-inset/50 hover:border-brand-500/40"} p-3 transition`}>
                 <div className="font-semibold text-[13px] text-ink truncate">{m.name}</div>
                 <div className="mt-1.5 flex items-baseline gap-1"><span className={`font-mono font-bold tnum ${tone.text}`}>{round1(d)}</span><span className="font-mono text-[11px] text-ink-dim">/ {cap}d</span></div>
-                <div className="mt-1.5 h-1.5 rounded-full bg-over overflow-hidden"><div className={`h-full ${tone.bar}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
+                <div className="mt-1.5 h-1.5 rounded-full bg-over overflow-hidden"><div className={`h-full origin-left transition-transform duration-700 ease-out ${tone.bar}`} style={{ transform: `scaleX(${Math.min(pct, 100) / 100})` }} /></div>
                 {pct > 100 && <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-bad-ink">over by {round1(d - cap)}d</div>}
               </button>
             );
@@ -1569,7 +1606,7 @@ function MachineLoading({ data, reload }) {
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
           <span className="text-ink-soft text-sm">Total load:</span>
           <span className={`font-mono text-2xl font-bold tnum ${loadTone(selPct).text}`}>{round1(selDays)}<span className="text-ink-dim text-base"> / {selCap} days</span></span>
-          <div className="flex-1 min-w-[120px] max-w-[280px] h-2 rounded-full bg-over overflow-hidden"><div className={`h-full ${loadTone(selPct).bar}`} style={{ width: `${Math.min(selPct, 100)}%` }} /></div>
+          <div className="flex-1 min-w-[120px] max-w-[280px] h-2 rounded-full bg-over overflow-hidden"><div className={`h-full origin-left transition-transform duration-700 ease-out ${loadTone(selPct).bar}`} style={{ transform: `scaleX(${Math.min(selPct, 100) / 100})` }} /></div>
           <span className={`font-mono text-sm font-bold ${loadTone(selPct).text}`}>{selPct}%</span>
         </div>
 
@@ -1735,19 +1772,32 @@ function ExcelImport({ data, reload }) {
 function SettingsPanel({ data, reload }) {
   const machines = (data.machines || []).filter((m) => m.active !== false);
   const [hr, setHr] = useState(String(data.settings?.target_hr || "2200"));
+  const [mr, setMr] = useState(String(data.settings?.machine_rate || "1200"));
   const [saved, setSaved] = useState(false);
+  const [savedMr, setSavedMr] = useState(false);
   const saveHr = async () => { try { await db.setSetting("target_hr", parseInt(hr, 10) || 2200); setSaved(true); setTimeout(() => setSaved(false), 1500); await reload(); } catch { /* keep */ } };
+  const saveMr = async () => { try { await db.setSetting("machine_rate", parseInt(mr, 10) || 1200); setSavedMr(true); setTimeout(() => setSavedMr(false), 1500); await reload(); } catch { /* keep */ } };
   const saveMachine = async (id, field, v) => { try { await db.setMachine(id, { [field]: Math.max(field === "shifts" ? 1 : 1, parseInt(v, 10) || 1) }); await reload(); } catch { /* keep */ } };
 
   return (
     <Panel title="Settings — capacity & costing" tag="05" className="mt-4">
-      <div className="max-w-sm mb-6">
-        <label className={labelCls}>Target hour-rate (₹/hr)</label>
-        <div className="flex gap-2">
-          <input type="number" min="0" value={hr} onChange={(e) => setHr(e.target.value)} className={inputCls} />
-          <MetalButton onClick={saveHr} className="shrink-0">{saved ? <><Check size={16} /> Saved</> : "Save"}</MetalButton>
+      <div className="grid sm:grid-cols-2 gap-5 max-w-2xl mb-6">
+        <div>
+          <label className={labelCls}>Target hour-rate (₹/hr)</label>
+          <div className="flex gap-2">
+            <input type="number" min="0" value={hr} onChange={(e) => setHr(e.target.value)} className={inputCls} />
+            <MetalButton onClick={saveHr} className="shrink-0">{saved ? <><Check size={16} /> Saved</> : "Save"}</MetalButton>
+          </div>
+          <p className="text-ink-dim text-xs mt-1.5">Your hour-rate goal — the Costing screen colours each part green at or above it.</p>
         </div>
-        <p className="text-ink-dim text-xs mt-1.5">Your hour-rate goal — the Costing screen colours each part green at or above it.</p>
+        <div>
+          <label className={labelCls}>Machine hour-rate (₹/hr)</label>
+          <div className="flex gap-2">
+            <input type="number" min="0" value={mr} onChange={(e) => setMr(e.target.value)} className={inputCls} />
+            <MetalButton onClick={saveMr} className="shrink-0">{savedMr ? <><Check size={16} /> Saved</> : "Save"}</MetalButton>
+          </div>
+          <p className="text-ink-dim text-xs mt-1.5">What one machine-hour costs you — from the Excel header (1200).</p>
+        </div>
       </div>
 
       <label className={labelCls}>Per-machine working days &amp; shifts</label>
@@ -2009,14 +2059,14 @@ function ConfirmDialog({ open, title, body, confirmLabel = "Confirm", danger = f
     <AnimatePresence>
       {open && (
         <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-base/85 p-4" onClick={onClose}>
-          <m.div ref={ref} role="dialog" aria-modal="true" aria-labelledby="confirm-dlg-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ type: "spring", stiffness: 360, damping: 30 }} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
+          <m.div ref={ref} role="dialog" aria-modal="true" aria-labelledby="confirm-dlg-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10, transition: exitTween(dur.modal) }} transition={spring.modal} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 id="confirm-dlg-title" className="font-display font-bold text-lg">{title}</h3>
               <button onClick={onClose} aria-label="Cancel" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06]"><X size={18} /></button>
             </div>
             {body && <div className="text-sm text-ink-soft leading-relaxed mb-5">{body}</div>}
             <div className="flex gap-3">
-              <m.button onClick={onClose} disabled={busy} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 420, damping: 26, mass: 0.6 }} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</m.button>
+              <m.button onClick={onClose} disabled={busy} whileTap={{ scale: 0.97 }} transition={spring.tap} className={`${btnSecondary} flex-1 !py-3.5`}>Cancel</m.button>
               <div className="flex-1">
                 <MetalButton onClick={onConfirm} disabled={busy} fullWidth variant={danger ? "error" : "default"} className="disabled:opacity-60 disabled:cursor-not-allowed">{busy ? "Working…" : confirmLabel}</MetalButton>
               </div>
@@ -2034,7 +2084,7 @@ function Meter({ pct, level, height = "h-2.5", ticks = false, color }) {
   const fill = color || (level ? STATUS[level].hex : HEX.brand);
   return (
     <div className={`relative w-full ${height} bg-inset rounded-[2px] overflow-hidden`}>
-      <m.div initial={{ width: 0 }} animate={{ width: `${Math.min(pct, 100)}%` }} transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }} className="h-full rounded-[1px]" style={{ background: fill }} />
+      <m.div initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.85, ease: ease.out }} className="h-full rounded-[1px] origin-left" style={{ width: `${Math.min(pct, 100)}%`, background: fill }} />
       {ticks && [25, 50, 75].map((t) => <span key={t} className="absolute top-0 bottom-0 w-px bg-base/70" style={{ left: `${t}%` }} />)}
     </div>
   );
@@ -2049,7 +2099,7 @@ function Kpi({ title, value, unit, sub, subLevel, pct, pctNeutral, spark, sparkL
   const sc = sparkLevel ? STATUS[sparkLevel].hex : HEX.brand;
   const sparkId = `kpi-${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
   return (
-    <m.div variants={itemV} whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300, damping: 22 }} onPointerMove={spotlightMove}
+    <m.div variants={itemV} whileHover={{ y: -3 }} transition={spring.card} onPointerMove={spotlightMove}
       className={`spotlight overflow-hidden [contain:content] ${PANEL} rounded-[10px] p-5 hover:bg-inset/40 hover:border-brand-500/40 hover:shadow-card-hover transition`}>
       <Eyebrow className="!text-[11px]">{title}</Eyebrow>
       <div className="mt-2.5 flex items-baseline gap-1.5">

@@ -47,7 +47,8 @@ export const LiquidButton = React.forwardRef(function LiquidButton(
       data-slot="button"
       className={cn(
         "relative inline-flex items-center justify-center cursor-pointer gap-2 whitespace-nowrap rounded-md text-sm font-semibold text-ink shrink-0 outline-none",
-        "transition-transform duration-300 hover:scale-[1.03] active:scale-[0.99]",
+        // asymmetric press physics: instant-feeling 75ms press-down, 300ms release
+        "transition-transform duration-300 hover:scale-[1.03] active:scale-[0.99] active:duration-75",
         "focus-visible:ring-2 focus-visible:ring-brand-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
         "disabled:pointer-events-none disabled:opacity-50",
         liquidSizes[size] || liquidSizes.xl,
@@ -113,7 +114,12 @@ const colorVariants = {
 
 const metalVariants = (variant, isPressed, isHovered, isTouchDevice) => {
   const colors = colorVariants[variant] || colorVariants.default;
-  const transition = "all 250ms cubic-bezier(0.1, 0.4, 0.2, 1)";
+  // Asymmetric press physics: the press-down must FEEL instant (≤100ms is the
+  // "direct manipulation" threshold), the release can luxuriate at 250ms. Only
+  // compositor/cheap properties — never `all`.
+  const transition = isPressed
+    ? "transform 70ms ease-out, box-shadow 70ms ease-out, filter 70ms ease-out"
+    : "transform 250ms cubic-bezier(0.1, 0.4, 0.2, 1), box-shadow 250ms cubic-bezier(0.1, 0.4, 0.2, 1), filter 250ms cubic-bezier(0.1, 0.4, 0.2, 1)";
   return {
     wrapper: cn("relative inline-flex transform-gpu rounded-md p-[1.25px] will-change-transform", colors.outer),
     wrapperStyle: {
@@ -161,13 +167,19 @@ export const MetalButton = React.forwardRef(function MetalButton(
 ) {
   const [isPressed, setIsPressed] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
-  const [isTouchDevice, setIsTouchDevice] = React.useState(false);
+  // Hover capability, not touch presence: "ontouchstart" wrongly kills hover on
+  // touchscreen laptops that also have a mouse. matchMedia answers the real question.
+  const [noHover, setNoHover] = React.useState(false);
 
   React.useEffect(() => {
-    setIsTouchDevice("ontouchstart" in window || navigator.maxTouchPoints > 0);
+    const mq = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const apply = () => setNoHover(!mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
   }, []);
 
-  const v = metalVariants(variant, isPressed, isHovered, isTouchDevice);
+  const v = metalVariants(variant, isPressed, isHovered, noHover);
 
   return (
     <div className={cn(v.wrapper, fullWidth && "flex w-full")} style={v.wrapperStyle}>
@@ -180,14 +192,18 @@ export const MetalButton = React.forwardRef(function MetalButton(
         onMouseDown={() => setIsPressed(true)}
         onMouseUp={() => setIsPressed(false)}
         onMouseLeave={() => { setIsPressed(false); setIsHovered(false); }}
-        onMouseEnter={() => { if (!isTouchDevice) setIsHovered(true); }}
+        onMouseEnter={() => { if (!noHover) setIsHovered(true); }}
         onTouchStart={() => setIsPressed(true)}
         onTouchEnd={() => setIsPressed(false)}
         onTouchCancel={() => setIsPressed(false)}
+        // Enter/Space must press the metal too — keyboard users get the same physics
+        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !e.repeat) setIsPressed(true); }}
+        onKeyUp={(e) => { if (e.key === "Enter" || e.key === " ") setIsPressed(false); }}
+        onBlur={() => setIsPressed(false)}
       >
         <ShineEffect isPressed={isPressed} />
         {children || "Button"}
-        {isHovered && !isPressed && !isTouchDevice && (
+        {isHovered && !isPressed && !noHover && (
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t rounded-md from-transparent to-white/5" />
         )}
       </button>

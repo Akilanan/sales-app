@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],
+  // hover: utilities only apply on devices that can actually hover — kills the
+  // "sticky hover after a tap" artifact on the shop-floor touch tablets.
+  future: { hoverOnlyWhenSupported: true },
   theme: {
     extend: {
       fontFamily: {
@@ -58,16 +61,6 @@ export default {
         raise: "inset 0 1px 0 0 rgba(255,255,255,0.08), inset 0 0 0 1px rgba(255,255,255,0.04), 0 22px 55px -20px rgba(0,0,0,0.8)",
         pop: "inset 0 1px 0 0 rgba(255,255,255,0.09), inset 0 0 0 1px rgba(255,255,255,0.05), 0 48px 95px -26px rgba(0,0,0,0.85)",
         ring: "0 0 0 1px rgba(255,255,255,0.5)",
-      },
-      keyframes: {
-        "pulse-dot": {
-          "0%": { boxShadow: "0 0 0 0 rgba(255,255,255,0.5)" },
-          "70%": { boxShadow: "0 0 0 5px rgba(255,255,255,0)" },
-          "100%": { boxShadow: "0 0 0 0 rgba(255,255,255,0)" },
-        },
-      },
-      animation: {
-        "pulse-dot": "pulse-dot 2.4s ease-out infinite",
       },
     },
   },

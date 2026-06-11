@@ -2,13 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
-/* NEUTRAL BASE — all decorative styling (aurora, grain, custom scrollbar, spotlight,
-   border-beam, custom cursor) has been stripped. This is a plain scaffold awaiting a
-   new design. Only functional rules remain (reduced-motion, focus, number/date inputs,
-   tabular figures). */
+/* Decorative layer: film grain (body::after), hidden scrollbar, pointer spotlight
+   (.spotlight — fed by --mx/--my from spotlightMove in App.jsx), live border-beam
+   (.border-beam), login smoke/scan/spotlight keyframes. Functional rules:
+   reduced-motion, focus, number/date inputs, tabular figures. */
 
 :root {
   color-scheme: dark;
+  /* Chrome 129+: lets height/width transition to `auto` natively (expanding rows,
+     accordions) — progressive enhancement, ignored elsewhere. */
+  interpolate-size: allow-keywords;
 }
 html,
 body,
@@ -17,6 +20,20 @@ body,
 }
 html {
   scroll-behavior: smooth;
+}
+/* Hide the browser scrollbar on the page scroller (immersive console). Scrolling
+   stays fully functional via wheel / touch / keyboard — this only removes the
+   bright default bar on the right edge that broke the cinematic dark hero. */
+html,
+body {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge/IE */
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chromium / WebKit */
 }
 /* respect reduced-motion globally */
 @media (prefers-reduced-motion: reduce) {
@@ -41,9 +58,69 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* FILM GRAIN — one static, viewport-fixed feTurbulence layer over the whole UI.
+   Kills gradient banding on near-black and adds the "expensive" instrument texture.
+   STATIC (never animated → cheap), pointer-events:none, subliminal opacity. The
+   noise SVG is inlined (no network request). Skipped under reduced-motion-agnostic
+   but it's static so it stays. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0.028;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
 ::selection {
   background: rgba(255, 255, 255, 0.2);
   color: #0a0a0a;
+}
+
+/* Login "drift smoke" — two soft monochrome radial blobs that slowly drift via
+   TRANSFORM only (compositor-cheap, no SVG filter, no external CDN assets). Gated
+   behind motion-safe so reduced-motion users get a static atmosphere. Replaces the
+   old etheral-shadow (infinite SVG hue-rotate + framerusercontent.com dependency). */
+@keyframes smoke-a {
+  0%, 100% { transform: translate3d(-4%, -2%, 0) scale(1); }
+  50%      { transform: translate3d(6%, 4%, 0) scale(1.15); }
+}
+@keyframes smoke-b {
+  0%, 100% { transform: translate3d(5%, 3%, 0) scale(1.1); }
+  50%      { transform: translate3d(-5%, -4%, 0) scale(1); }
+}
+/* Spotlight (aceternity) — a soft light beam that eases in + drifts into place on
+   mount. Keyframe lives here (not tailwind.config) so HMR picks it up without a
+   dev restart. Reduced-motion: near-zero duration + fill-forwards → snaps to the
+   lit end-state (visible, static). */
+@keyframes spotlight {
+  0%   { opacity: 0; transform: translate(-72%, -62%) scale(0.5); }
+  100% { opacity: 1; transform: translate(-50%, -40%) scale(1); }
+}
+/* Holographic scan sweep — a soft light band that travels down the login's left
+   panel (transform-only, compositor-cheap; gated motion-safe at the call-site). */
+@keyframes scan-sweep {
+  0%   { transform: translateY(-12rem); }
+  100% { transform: translateY(110vh); }
+}
+/* Skeleton shimmer — transform-only light sweep across loading placeholder blocks
+   (gated motion-safe at the call-site). */
+@keyframes shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+/* Spring release for tactile controls (keypad, steppers, chips) — a CSS linear()
+   spring with a SUBTLE ~3% overshoot (instrument feel, not bouncy). Zero JS;
+   pre-linear() Chrome just falls back to its default easing. */
+@supports (transition-timing-function: linear(0, 1)) {
+  .ease-spring-out {
+    transition-timing-function: linear(
+      0, 0.063, 0.226 9.6%, 0.61 18.4%, 0.873 27.8%, 0.964 32.6%,
+      1.019 38.2%, 1.032 44.4%, 1.03 52.4%, 1.005 69.6%, 1
+    );
+  }
 }
 *:focus-visible {
   outline: 2px solid #e4e4e7;
@@ -59,11 +136,88 @@ input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-.tnum {
-  font-variant-numeric: tabular-nums;
+/* Instrument-grade numerals: tabular figures (columns align, live values don't
+   reflow/jitter as they tick) + slashed zero (disambiguates 0/O for part counts
+   and machine IDs). Applied to the mono data font app-wide and to .tnum. */
+.tnum,
+.font-mono,
+.font-display {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "tnum" 1, "zero" 1;
 }
 /* dark native date picker */
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(0.85);
   cursor: pointer;
+}
+
+/* POINTER SPOTLIGHT — the Linear-style sheen that follows the cursor across a
+   card. App.jsx's spotlightMove writes the local cursor position into --mx/--my;
+   this paints a soft white radial there. Hover-gated to FINE pointers only, so
+   shop-floor touch tablets never paint (or stick) it. */
+.spotlight {
+  position: relative;
+}
+.spotlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(200px circle at var(--mx, 50%) var(--my, 50%), rgba(255, 255, 255, 0.055), transparent 65%);
+  opacity: 0;
+  transition: opacity 0.25s ease-out;
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .spotlight:hover::after {
+    opacity: 1;
+  }
+}
+
+/* BORDER BEAM — a white light running along a panel's border ring. Used as the
+   live-connection heartbeat on the glance banner and (faster) as the CRITICAL
+   alarm on machine cards: in a grayscale system, MOTION is the urgency channel.
+   conic-gradient rotated via a registered @property (compositor-friendly in
+   Chromium); the mask keeps only the 1px border ring visible. Global
+   reduced-motion kill-rule freezes it to a static highlight. */
+@property --beam-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes beam-rotate {
+  to { --beam-angle: 360deg; }
+}
+.border-beam,
+.border-beam-alert {
+  position: relative;
+}
+.border-beam::before,
+.border-beam-alert::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--beam-angle),
+    transparent 0deg 300deg,
+    rgba(255, 255, 255, 0.55) 340deg,
+    rgba(255, 255, 255, 0.05) 360deg
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: beam-rotate 7s linear infinite;
+}
+.border-beam-alert::before {
+  background: conic-gradient(
+    from var(--beam-angle),
+    transparent 0deg 280deg,
+    rgba(255, 255, 255, 0.85) 330deg,
+    rgba(255, 255, 255, 0.08) 360deg
+  );
+  animation-duration: 2.6s;
 }

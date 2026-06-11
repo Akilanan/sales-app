@@ -34,12 +34,26 @@ const store = {
   },
 };
 
+// Bump when the seed data changes shape — existing browsers wipe + reseed so
+// nobody is left looking at the previous (fake) factory.
+const SEED_VERSION = "2-real-factory";
+const SEED_TABLES = [
+  "users", "machines", "components", "monthly_plans", "production_entries",
+  "component_operations", "machine_plan_lines", "app_settings",
+];
+
 let seedPromise;
 export async function seedIfEmpty() {
   if (seedPromise) return seedPromise; // guard against React StrictMode double-run
   seedPromise = (async () => {
-    if (await store.read("components")) return;
+    const haveData = await store.read("components");
+    const ver = await store.read("seed_version");
+    if (haveData && ver === SEED_VERSION) return;
+    for (const t of SEED_TABLES) await store.write(t, null); // stale demo → full reseed
 
+    // People are DEMO-ONLY (the Excel has no names/PINs — real people come from
+    // Akilan via Team admin). Everything below them is the REAL factory from his
+    // HMC&VMC Excel sheets, mirroring the live Supabase seed.
     const users = [
       { id: uid(), name: "Ravi Kumar", role: "operator", login_code: "1001", username: null, password: null, active: true },
       { id: uid(), name: "Suresh Patil", role: "operator", login_code: "1002", username: null, password: null, active: true },
@@ -47,24 +61,62 @@ export async function seedIfEmpty() {
       { id: uid(), name: "Anita Rao", role: "supervisor", login_code: null, username: "anita", password: "anita123", active: true },
       { id: uid(), name: "Admin", role: "admin", login_code: null, username: "admin", password: "admin123", active: true },
     ];
-    const machines = ["CNC-01", "CNC-02", "CNC-03", "CNC-04"].map((code) => ({ id: uid(), code, name: code, active: true }));
-    // `perf` = each line's pace vs plan, so the demo board shows a believable
-    // spread (one critical line dragging the floor, two behind, two on/ahead) and
-    // exercises the whole green/amber/red status system — not a flat amber wall.
-    const seed = [
-      // perf is calibrated so the board still shows green AFTER today's partial day
-      // (shift 3 isn't logged yet, which trims ~5% off every line's pace).
-      { code: "CP-100", name: "Clamping Plate", industry: "railway", target: 1240, wd: 24, perf: 0.74 }, // critical — the problem line
-      { code: "WHF-22", name: "Wind Hub Flange", industry: "wind", target: 760, wd: 25, perf: 1.16 },   // clearly ahead of pace
-      { code: "MC-07", name: "Marine Coupling", industry: "marine", target: 425, wd: 26, perf: 0.90 },  // behind
-      { code: "RAB-15", name: "Rail Axle Bush", industry: "railway", target: 980, wd: 24, perf: 1.10 }, // on track
-      { code: "WBR-09", name: "Wind Brake Disc", industry: "wind", target: 612, wd: 25, perf: 0.85 },   // behind
+
+    // The 15 real machines (Excel Sheet1 machine master), incl. per-machine shifts.
+    const MACHINE_DEFS = [
+      ["A81", 3], ["CWK 630", 2], ["CWK 800", 3], ["Toyoda800", 3], ["Toyoda 1000", 3],
+      ["Toyoda S55-1", 1], ["Toyoda S55-2", 2], ["Toyoda630-1", 3], ["Toyoda630-2", 3],
+      ["DMG MORI-1", 3], ["DMG MORI-2", 3], ["MCB-1 HMC-12", 3], ["MCB-2 HMC-13", 3],
+      ["VMC-1", 3], ["VMC-2", 3],
     ];
-    const components = seed.map((c) => ({ id: uid(), code: c.code, name: c.name, industry: c.industry, active: true }));
+    const machines = MACHINE_DEFS.map(([code, shifts]) => ({ id: uid(), code, name: code, shifts, working_days: 24, active: true }));
+    const machineBy = {};
+    machines.forEach((m) => { machineBy[m.code] = m; });
+
+    // The 8 real parts + June plan targets (Akilan's 2026-06-11 ruling: June-file
+    // plan values; 5713 = 75 per his Sheet1 note). `perf` = demo pace vs plan so
+    // the board shows a believable green/amber/critical spread.
+    const seed = [
+      { code: "1159",  name: "Bearing Casing 1159",          target: 224, perf: 0.92 }, // slightly behind
+      { code: "5712",  name: "Clamping Plate DE 5712",       target: 50,  perf: 1.12 }, // ahead
+      { code: "5713",  name: "Clamping Plate DE 5713",       target: 75,  perf: 0.74 }, // critical line
+      { code: "E191",  name: "E191 Cover",                   target: 24,  perf: 1.04 }, // on track
+      { code: "SPX",   name: "SPX Flow (Dev)",               target: 5,   perf: 0 },
+      { code: "5048A", name: "5048A Housing Cover (Dev)",    target: 4,   perf: 0 },
+      { code: "4797",  name: "Largest Shield 4797 (Rabwin)", target: 1,   perf: 0 },
+      { code: "4798",  name: "Bearing Shield 4798 (Rabwin)", target: 1,   perf: 0 },
+    ];
+    const components = seed.map((c) => ({ id: uid(), code: c.code, name: c.name, industry: null, rate: 0, active: true }));
+    const compBy = {};
+    components.forEach((c) => { compBy[c.code] = c; });
     const month = monthToDate(curMonth());
-    const monthly_plans = components.map((c, i) => ({ id: uid(), month, component_id: c.id, target_qty: seed[i].target, working_days: seed[i].wd }));
+    const monthly_plans = components.map((c, i) => ({ id: uid(), month, component_id: c.id, target_qty: seed[i].target, working_days: 24 }));
     const perfBy = {};
     components.forEach((c, i) => { perfBy[c.id] = seed[i].perf; });
+
+    // Real routings (op no, cycle sec/pc, setup min) from the June+May workbooks.
+    const OP_DEFS = [
+      ["1159", 40, 28, 56], ["1159", 50, 38, 76], ["1159", 60, 6, 12], ["1159", 70, 6, 12],
+      ["5712", 40, 120, 480], ["5713", 40, 103, 480], ["E191", 40, 60, 480],
+      ["4797", 30, 93, 1330], ["4797", 40, 61, 730], ["4798", 30, 126, 1300], ["4798", 40, 52, 680],
+      ["5048A", 20, 60, 180], ["5048A", 30, 50, 150], ["5048A", 40, 30, 90],
+      ["SPX", 20, 130, 800],
+    ];
+    const component_operations = OP_DEFS.map(([code, op_no, cy, su]) => ({
+      id: uid(), component_id: compBy[code].id, op_no, description: null,
+      cycle_time: cy, setup_time: su, insertion_time: 60, active: true, created_at: new Date().toISOString(),
+    }));
+
+    // Machine loading mirroring the June tabs: VMC-1 carries the VMC-01 parts,
+    // A81 the a51 HMC-01 parts — so Loading/Gantt/costing demo with real shapes.
+    const PLAN_DEFS = [
+      ["VMC-1", "5712", 50], ["VMC-1", "5713", 75], ["VMC-1", "E191", 24],
+      ["A81", "1159", 224], ["A81", "4797", 1], ["A81", "4798", 1],
+    ];
+    const machine_plan_lines = PLAN_DEFS.map(([mc, cc, qty], i) => ({
+      id: uid(), month, machine_id: machineBy[mc].id, component_id: compBy[cc].id,
+      qty, seq: i + 1, active: true, created_at: new Date().toISOString(),
+    }));
 
     const operators = users.filter((u) => u.role === "operator");
     const entries = [];
@@ -75,7 +127,8 @@ export async function seedIfEmpty() {
       components.forEach((c) => {
         const p = monthly_plans.find((x) => x.component_id === c.id);
         const perShift = (p.target_qty / p.working_days) / 3;
-        const perf = perfBy[c.id] || 1; // line's intended pace
+        const perf = perfBy[c.id] || 0; // line's intended pace (0 = low-volume dev part)
+        if (perShift * perf < 0.15) return; // dev parts get hand-placed entries below
         SHIFTS.forEach((s) => {
           if (ds === todayStr() && s === 3) return;
           entries.push({
@@ -87,12 +140,24 @@ export async function seedIfEmpty() {
         });
       });
     }
+    // Low-volume dev/Rabwin parts: a couple of real-feeling single entries.
+    const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString("en-CA"); };
+    if (daysAgo(3).slice(0, 7) === curMonth()) {
+      entries.push(
+        { id: uid(), production_date: daysAgo(3), shift: 1, component_id: compBy["4797"].id, machine_id: machineBy["A81"].id, operator_id: operators[0].id, quantity: 1, scrap_qty: 0, notes: "", created_at: Date.now() - 3 * 86400000 },
+        { id: uid(), production_date: daysAgo(2), shift: 2, component_id: compBy["SPX"].id, machine_id: machineBy["VMC-2"].id, operator_id: operators[1].id, quantity: 2, scrap_qty: 0, notes: "", created_at: Date.now() - 2 * 86400000 },
+        { id: uid(), production_date: daysAgo(1), shift: 1, component_id: compBy["5048A"].id, machine_id: machineBy["VMC-2"].id, operator_id: operators[2].id, quantity: 1, scrap_qty: 0, notes: "", created_at: Date.now() - 1 * 86400000 },
+      );
+    }
 
     await store.write("users", users);
     await store.write("machines", machines);
     await store.write("components", components);
     await store.write("monthly_plans", monthly_plans);
+    await store.write("component_operations", component_operations);
+    await store.write("machine_plan_lines", machine_plan_lines);
     await store.write("production_entries", entries);
+    await store.write("seed_version", SEED_VERSION);
   })();
   return seedPromise;
 }
@@ -124,7 +189,7 @@ export const db = {
   // ---- SETTINGS + machine capacity (editable) · demo parity ------------------
   async getSettings() {
     const s = (await store.read("app_settings")) || {};
-    return { target_hr: "2200", ...s };
+    return { target_hr: "2200", machine_rate: "1200", ...s };
   },
   async setSetting(key, value) {
     const s = (await store.read("app_settings")) || {};

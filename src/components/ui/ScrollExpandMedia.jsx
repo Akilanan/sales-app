@@ -1,188 +1,206 @@
-// ScrollExpandMedia — faithful JSX port of the user's pasted scroll-expansion-hero.tsx.
-// Adapted: next/image -> <img>, TS removed, framer-motion `m` (LazyMotion strict),
-// image onError fallback, and accessibility additions for an ops-console login:
-//   - prefers-reduced-motion expands immediately (no scroll-jacking)
-//   - a tap/click anywhere + an explicit "Enter" button jump to fully expanded
-// The expanding media reveals `children` (the sign-in form) once fully open.
-import React, { useEffect, useRef, useState, useCallback } from "react";
+// ScrollExpandMedia — the cinematic SPLIT login (single screen, no scroll).
+//
+// Composition (back → front), per the original 21st.dev splite demo: the robot
+// sits on PURE BLACK — no backdrop photo, no extra 3D objects, no color grade.
+//   1. optional ambient 3D layer (`scene` prop) — currently unwired (null);
+//      Ambient.jsx is kept on disk for cheap reversal.
+//   2. the white Spotlight beam.
+//   3. the split grid —
+//        LEFT  (lg+): the INTERACTIVE Spline robot (pasted 21st.dev component —
+//               looks at / follows the cursor) under a holographic scan-line
+//               overlay, with the boot sequence + brand lockup floating above it.
+//               Loads from prod.spline.design (CDN) — wrapped in Suspense + an
+//               error boundary so an offline shop floor still gets the black
+//               panel + brand text, never a broken panel.
+//        RIGHT: the sign-in card (children) on a frosted panel with a
+//               cursor-following spotlight sheen.
+// Mobile (<lg): the left showcase is hidden (saves the robot's CDN download);
+// the sign-in card centres on the black backdrop.
+import React from "react";
 import { m } from "framer-motion";
-import { MetalButton } from "./buttons";
+import { Spotlight } from "./spotlight";
+import { CursorSpotlight } from "./spotlight-cursor";
+import { SplineScene } from "./splite";
+import { ease, dur } from "../../lib/motion";
+import { LOW_POWER } from "../../lib/power";
 
 const REDUCED =
   typeof window !== "undefined" &&
   window.matchMedia &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export default function ScrollExpandMedia({
-  mediaSrc,
-  bgImageSrc,
-  title,
-  date,
-  scrollToExpand,
-  textBlend,
-  enterLabel = "Enter Console",
-  children,
-}) {
-  const [scrollProgress, setScrollProgress] = useState(REDUCED ? 1 : 0);
-  const [showContent, setShowContent] = useState(REDUCED);
-  const [mediaFullyExpanded, setMediaFullyExpanded] = useState(REDUCED);
-  const [touchStartY, setTouchStartY] = useState(0);
-  const [isMobileState, setIsMobileState] = useState(false);
-  const contentRef = useRef(null);
+// The 21st.dev demo's interactive robot-head scene (cursor-tracking).
+const SPLINE_SCENE = "https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode";
 
-  // Jump straight to fully-expanded + revealed (tap / button / reduced-motion).
-  const jumpToExpanded = useCallback(() => {
-    setScrollProgress(1);
-    setMediaFullyExpanded(true);
-    setShowContent(true);
-    if (typeof window !== "undefined") {
-      requestAnimationFrame(() =>
-        contentRef.current?.scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "start" })
-      );
-    }
+// Mount the robot ONLY at lg+ widths. The left panel is `hidden lg:block`, so
+// without this gate Spline still mounts into a display:none container — a
+// zero-size canvas that spams GL_INVALID_FRAMEBUFFER_OPERATION every frame and
+// downloads the multi-MB CDN scene on phones that never show it.
+function useIsDesktop() {
+  const [wide, setWide] = React.useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches
+  );
+  React.useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onChange = (e) => setWide(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   }, []);
+  return wide;
+}
 
-  useEffect(() => {
-    if (REDUCED) return; // already expanded; don't hijack scroll
+// If the Spline runtime or its CDN scene fails, the panel falls back to the
+// black panel + brand text — never a broken login.
+class SplineErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { /* swallow — ambient layers carry the hero */ }
+  render() { return this.state.failed ? null : this.props.children; }
+}
 
-    const handleWheel = (e) => {
-      if (mediaFullyExpanded && e.deltaY < 0 && window.scrollY <= 5) {
-        setMediaFullyExpanded(false);
-        e.preventDefault();
-      } else if (!mediaFullyExpanded) {
-        e.preventDefault();
-        const newProgress = Math.min(Math.max(scrollProgress + e.deltaY * 0.0009, 0), 1);
-        setScrollProgress(newProgress);
-        if (newProgress >= 1) { setMediaFullyExpanded(true); setShowContent(true); }
-        else if (newProgress < 0.75) setShowContent(false);
-      }
-    };
-    const handleTouchStart = (e) => setTouchStartY(e.touches[0].clientY);
-    const handleTouchMove = (e) => {
-      if (!touchStartY) return;
-      const deltaY = touchStartY - e.touches[0].clientY;
-      if (mediaFullyExpanded && deltaY < -20 && window.scrollY <= 5) {
-        setMediaFullyExpanded(false);
-        e.preventDefault();
-      } else if (!mediaFullyExpanded) {
-        e.preventDefault();
-        const scrollFactor = deltaY < 0 ? 0.008 : 0.005;
-        const newProgress = Math.min(Math.max(scrollProgress + deltaY * scrollFactor, 0), 1);
-        setScrollProgress(newProgress);
-        if (newProgress >= 1) { setMediaFullyExpanded(true); setShowContent(true); }
-        else if (newProgress < 0.75) setShowContent(false);
-        setTouchStartY(e.touches[0].clientY);
-      }
-    };
-    const handleTouchEnd = () => setTouchStartY(0);
-    const handleScroll = () => { if (!mediaFullyExpanded) window.scrollTo(0, 0); };
+// ---- holographic boot sequence ------------------------------------------------
+const BOOT_LINES = [
+  ["01", "SPINDLE CALIBRATION"],
+  ["02", "LIGHT RIG · ENV BAKE"],
+  ["03", "TELEMETRY LINK"],
+];
 
-    window.addEventListener("wheel", handleWheel, { passive: false });
-    window.addEventListener("scroll", handleScroll);
-    window.addEventListener("touchstart", handleTouchStart, { passive: false });
-    window.addEventListener("touchmove", handleTouchMove, { passive: false });
-    window.addEventListener("touchend", handleTouchEnd);
-    return () => {
-      window.removeEventListener("wheel", handleWheel);
-      window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchend", handleTouchEnd);
-    };
-  }, [scrollProgress, mediaFullyExpanded, touchStartY]);
+function BootSequence() {
+  return (
+    <m.div
+      initial={REDUCED ? false : "hidden"}
+      animate="show"
+      variants={{ hidden: {}, show: { transition: { staggerChildren: 0.45, delayChildren: 0.6 } } }}
+      className="mt-7 max-w-xs space-y-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-ink-dim"
+    >
+      {BOOT_LINES.map(([n, label]) => (
+        <m.p
+          key={n}
+          variants={{ hidden: { opacity: 0, x: -8 }, show: { opacity: 1, x: 0, transition: { duration: 0.3, ease: ease.out } } }}
+          className="flex items-baseline gap-3"
+        >
+          <span className="text-ink-dim/60">//{n}</span>
+          <span>{label}</span>
+          <span className="flex-1 min-w-4 border-b border-dotted border-ink-dim/30 translate-y-[-3px]" aria-hidden="true" />
+          <span className="text-ink-soft">OK</span>
+        </m.p>
+      ))}
+      <m.p
+        variants={{ hidden: { opacity: 0 }, show: { opacity: 1, transition: { duration: 0.35 } } }}
+        className="pt-2 flex items-center gap-2.5 text-ink-soft"
+      >
+        <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-ink-soft motion-safe:animate-ping opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ink" />
+        </span>
+        SYSTEM ONLINE
+      </m.p>
+    </m.div>
+  );
+}
 
-  useEffect(() => {
-    const checkIfMobile = () => setIsMobileState(window.innerWidth < 768);
-    checkIfMobile();
-    window.addEventListener("resize", checkIfMobile);
-    return () => window.removeEventListener("resize", checkIfMobile);
-  }, []);
-
-  const mediaWidth = 300 + scrollProgress * (isMobileState ? 650 : 1250);
-  const mediaHeight = 400 + scrollProgress * (isMobileState ? 200 : 400);
-  const textTranslateX = scrollProgress * (isMobileState ? 180 : 150);
-
+export default function ScrollExpandMedia({ title, date, scene, children }) {
+  const isDesktop = useIsDesktop();
   const firstWord = title ? title.split(" ")[0] : "";
   const restOfTitle = title ? title.split(" ").slice(1).join(" ") : "";
 
-  const onImgError = (e) => {
-    if (bgImageSrc && e.currentTarget.src !== bgImageSrc) e.currentTarget.src = bgImageSrc;
-    else e.currentTarget.style.display = "none";
-  };
+  // Spline power management: force the scene background to true black at runtime
+  // (no re-export needed), and park the whole WebGL loop when the tab is hidden —
+  // a login left open on a shop tablet must idle cold, not at full rAF.
+  const splineApp = React.useRef(null);
+  const onSplineLoad = React.useCallback((app) => {
+    splineApp.current = app;
+    try { app.setBackgroundColor("#000000"); } catch { /* older runtime — scene is near-black anyway */ }
+    if (document.hidden) { try { app.stop(); } catch { /* ok */ } }
+  }, []);
+  React.useEffect(() => {
+    const onVis = () => {
+      const app = splineApp.current;
+      if (!app) return;
+      try { document.hidden ? app.stop() : app.play(); } catch { /* ok */ }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  const reveal = REDUCED
+    ? {}
+    : { initial: { opacity: 0, y: 18 }, animate: { opacity: 1, y: 0 }, transition: { duration: dur.hero, ease: ease.emphasis } };
+  const revealCard = REDUCED
+    ? {}
+    : { initial: { opacity: 0, y: 20, scale: 0.985 }, animate: { opacity: 1, y: 0, scale: 1 }, transition: { duration: dur.hero, ease: ease.emphasis, delay: 0.08 } };
 
   return (
-    <div className="transition-colors duration-700 ease-in-out overflow-x-hidden bg-base text-ink">
-      <section className="relative flex flex-col items-center justify-start min-h-[100dvh]">
-        <div className="relative w-full flex flex-col items-center min-h-[100dvh]">
-          {/* full-bleed background photo that fades as the media expands */}
-          <m.div className="absolute inset-0 z-0 h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 - scrollProgress }} transition={{ duration: 0.1 }}>
-            <img src={bgImageSrc} alt="" onError={onImgError} className="w-screen h-screen object-cover object-center" />
-            <div className="absolute inset-0 bg-base/40" />
-            <div className="absolute inset-0 bg-gradient-to-b from-base/30 via-transparent to-base" />
-          </m.div>
+    <div className="relative min-h-[100dvh] w-full overflow-hidden bg-black text-ink">
+      {/* 1 · optional ambient 3D layer (unwired — robot owns the black void) */}
+      <div className="absolute inset-0 z-[1]">{scene}</div>
 
-          <div className="container mx-auto flex flex-col items-center justify-start relative z-10">
-            <div className="flex flex-col items-center justify-center w-full h-[100dvh] relative">
-              {/* the expanding media tile */}
-              <button
-                type="button"
-                onClick={() => { if (!mediaFullyExpanded) jumpToExpanded(); }}
-                aria-label={mediaFullyExpanded ? undefined : enterLabel}
-                className="absolute z-0 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-2xl overflow-hidden ring-1 ring-white/10 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
-                style={{
-                  width: `${mediaWidth}px`,
-                  height: `${mediaHeight}px`,
-                  maxWidth: "95vw",
-                  maxHeight: "85vh",
-                  boxShadow: "0px 0px 50px rgba(0,0,0,0.45)",
-                  transition: REDUCED ? "none" : "width 0.08s linear, height 0.08s linear",
-                }}
-              >
-                <img src={mediaSrc} alt={title || "Prana Venture"} onError={onImgError} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-base/70 via-base/20 to-base/30" />
-              </button>
+      {/* 2 · spotlight beam */}
+      <Spotlight className="-top-40 -left-20 md:left-0 z-[2]" fill="white" />
 
-              {/* title overlay — two halves slide apart as the media opens */}
-              <div className={`relative z-10 flex flex-col items-center text-center ${mediaFullyExpanded ? "pointer-events-none" : ""}`}>
-                {date && (
-                  <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-ink-soft mb-3" style={{ transform: `translateX(-${textTranslateX * 0.25}vw)` }}>
-                    {date}
-                  </p>
-                )}
-                <div className={`flex items-center justify-center gap-x-4 sm:gap-x-8 ${textBlend ? "mix-blend-difference" : ""}`}>
-                  <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-[-0.03em] leading-none" style={{ transform: `translateX(-${textTranslateX}vw)` }}>
-                    {firstWord}
-                  </h1>
-                  <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-[-0.03em] leading-none text-ink-soft" style={{ transform: `translateX(${textTranslateX}vw)` }}>
-                    {restOfTitle}
-                  </h1>
-                </div>
-                {!mediaFullyExpanded && (
-                  <div className="mt-9 flex flex-col items-center gap-4">
-                    <MetalButton variant="default" onClick={jumpToExpanded} className="pointer-events-auto px-8">
-                      {enterLabel}
-                    </MetalButton>
-                    {scrollToExpand && (
-                      <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-ink-dim">{scrollToExpand}</p>
-                    )}
-                  </div>
-                )}
+      {/* 3 · split content — LEFT robot showcase · RIGHT sign-in. One viewport. */}
+      <div className="relative z-10 grid min-h-[100dvh] grid-cols-1 lg:grid-cols-[1.05fr_0.95fr]">
+        {/* LEFT — interactive Spline robot + holographic overlays */}
+        <m.div {...reveal} className="relative hidden lg:block">
+          {/* the robot tracks the cursor — needs pointer events, so every overlay
+              above it is pointer-events-none */}
+          {!REDUCED && !LOW_POWER && isDesktop && (
+            <SplineErrorBoundary>
+              <div className="absolute inset-0">
+                <SplineScene scene={SPLINE_SCENE} className="w-full h-full" onLoad={onSplineLoad} />
               </div>
+            </SplineErrorBoundary>
+          )}
+
+          {/* holographic scan-lines + a slow travelling scan band */}
+          <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+            <div
+              className="absolute inset-0 opacity-60"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(to bottom, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 3px)",
+              }}
+            />
+            <div
+              className="absolute inset-x-0 top-0 h-40 motion-safe:[animation:scan-sweep_7s_linear_infinite]"
+              style={{ background: "linear-gradient(to bottom, transparent, rgba(170,220,255,0.07), transparent)" }}
+            />
+          </div>
+
+          {/* brand + boot sequence, floating above the robot */}
+          <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-12 xl:p-16">
+            <div>
+              {date && (
+                <p className="font-mono text-[11px] uppercase tracking-[0.34em] text-ink-soft/90 flex items-center gap-3">
+                  <span className="h-px w-8 bg-ink-soft/40" aria-hidden="true" />
+                  {date}
+                </p>
+              )}
+              <BootSequence />
+            </div>
+            <div>
+              <h1 className="font-display text-6xl xl:text-7xl font-extrabold tracking-[-0.045em] leading-[0.88] [text-shadow:0_4px_44px_rgba(0,0,0,0.7)]">
+                {firstWord}
+              </h1>
+              <h1 className="font-display text-6xl xl:text-7xl font-extrabold tracking-[-0.045em] leading-[0.88] text-ink-soft [text-shadow:0_4px_44px_rgba(0,0,0,0.7)]">
+                {restOfTitle}
+              </h1>
+              <p className="mt-5 max-w-sm text-ink-soft text-sm leading-relaxed [text-shadow:0_2px_18px_rgba(0,0,0,0.8)]">
+                Daily production planning &amp; Plan-vs-Actual tracking for the CNC floor.
+              </p>
             </div>
           </div>
-        </div>
-      </section>
+        </m.div>
 
-      {/* revealed content (the sign-in form) */}
-      <m.section
-        ref={contentRef}
-        className="relative z-10 flex flex-col items-center w-full px-6 pb-16 min-h-[100dvh] justify-center"
-        animate={{ opacity: showContent ? 1 : 0 }}
-        transition={{ duration: 0.5 }}
-        style={{ pointerEvents: showContent ? "auto" : "none" }}
-      >
-        {children}
-      </m.section>
+        {/* RIGHT — sign-in on a frosted panel with a cursor-following sheen */}
+        <m.div
+          {...revealCard}
+          className="relative flex items-center justify-center px-6 py-10 sm:px-10 min-h-[100dvh] lg:min-h-0 lg:border-l lg:border-hair lg:bg-base/45 lg:backdrop-blur-xl"
+        >
+          {!REDUCED && <CursorSpotlight size={340} />}
+          {children}
+        </m.div>
+      </div>
     </div>
   );
 }
