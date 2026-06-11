@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import {
   SquaresFour as LayoutDashboard, ClipboardText as ClipboardList,
-  SlidersHorizontal as Settings2, Plus, Trash as Trash2, Check, SignOut as LogOut, X,
+  SlidersHorizontal as Settings2, UsersThree as Users, Copy, Plus, Trash as Trash2, Check, SignOut as LogOut, X,
   TrendUp as TrendingUp, TrendDown as TrendingDown, Clock, ArrowRight,
   Warning as AlertTriangle, ShieldCheck, Backspace as Delete, Minus, Eye, EyeSlash,
 } from "@phosphor-icons/react";
@@ -375,6 +375,7 @@ export default function App() {
         { id: "dashboard", name: "Dashboard", icon: LayoutDashboard, roles: ["supervisor", "admin"] },
         { id: "entry", name: "Shift Entry", icon: ClipboardList, roles: ["operator", "supervisor", "admin"] },
         { id: "plan", name: "Plan Setup", icon: Settings2, roles: ["supervisor", "admin"] },
+        { id: "team", name: "Team", icon: Users, roles: ["admin"] },
       ].filter((t) => t.roles.includes(user.role))
     : [];
   const activeTabName = (navTabs.find((t) => t.id === view) || navTabs[0] || {}).name;
@@ -411,6 +412,7 @@ export default function App() {
                   {view === "dashboard" && <Dashboard data={data} live={live} setView={setView} />}
                   {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} />}
                   {view === "plan" && <PlanSetup data={data} reload={loadData} />}
+                  {view === "team" && <TeamAdmin user={user} />}
                 </m.div>
               </AnimatePresence>
             </main>
@@ -1057,6 +1059,152 @@ function ShiftEntry({ data, user, reload }) {
 }
 
 /* ------------------------------ Plan Setup -------------------------------- */
+/* ------------------------------ Team (admin) ------------------------------ */
+// Admin-only: add/deactivate operators & managers. All writes go through the
+// admin-users Edge Function (which re-checks admin role server-side); the
+// generated PIN/password is shown ONCE for the admin to hand out.
+function CredentialReveal({ created, onClose }) {
+  const [copied, setCopied] = useState(false);
+  if (!created) return null;
+  const line = created.type === "operator"
+    ? `${created.name} — Operator PIN: ${created.pin}`
+    : `${created.name} — Manager · username: ${created.username} · password: ${created.password}`;
+  const copy = async () => { try { await navigator.clipboard.writeText(line); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { /* ignore */ } };
+  return (
+    <m.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-4">
+      <div className="rounded-[10px] border border-ok/40 bg-ok-soft p-4">
+        <div className="flex items-center gap-2 mb-2"><Check size={16} className="text-ok-ink" /><span className="font-display font-semibold text-sm text-ink">{created.name} added — save this login now</span></div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {created.type === "operator" ? (
+            <span className="font-mono text-lg font-bold text-ink tnum">PIN {created.pin}</span>
+          ) : (
+            <span className="font-mono text-sm text-ink"><b>{created.username}</b> · <span className="select-all">{created.password}</span></span>
+          )}
+          <button onClick={copy} className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">{copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}</button>
+        </div>
+        <div className="text-[12px] text-ink-soft mt-2">This won't be shown again — give it to {created.name}, then dismiss.</div>
+        <button onClick={onClose} className="mt-3 text-[12px] font-semibold text-ink-dim hover:text-ink underline underline-offset-2">Dismiss</button>
+      </div>
+    </m.div>
+  );
+}
+
+function TeamAdmin({ user }) {
+  const [users, setUsers] = useState(null); // null = loading
+  const [err, setErr] = useState("");
+  const [created, setCreated] = useState(null);
+  const [opName, setOpName] = useState(""); const [opBusy, setOpBusy] = useState(false);
+  const [mgName, setMgName] = useState(""); const [mgUser, setMgUser] = useState(""); const [mgRole, setMgRole] = useState("supervisor"); const [mgBusy, setMgBusy] = useState(false);
+  const [toggle, setToggle] = useState(null); // user pending activate/deactivate confirm
+  const [tBusy, setTBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setUsers(await db.adminListUsers()); } catch (e) { setErr(e.message || "Failed to load team"); setUsers([]); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const addOperator = async () => {
+    if (!opName.trim() || opBusy) return;
+    setOpBusy(true); setErr("");
+    try { const r = await db.adminCreateOperator(opName.trim()); setCreated({ type: "operator", ...r }); setOpName(""); await load(); }
+    catch (e) { setErr(e.message || "Failed to add operator"); }
+    finally { setOpBusy(false); }
+  };
+  const addManager = async () => {
+    if (!mgName.trim() || !mgUser.trim() || mgBusy) return;
+    setMgBusy(true); setErr("");
+    try { const r = await db.adminCreateManager({ name: mgName.trim(), username: mgUser.trim(), role: mgRole }); setCreated({ type: "manager", ...r }); setMgName(""); setMgUser(""); await load(); }
+    catch (e) { setErr(e.message || "Failed to add manager"); }
+    finally { setMgBusy(false); }
+  };
+  const confirmToggle = async () => {
+    if (!toggle || tBusy) return;
+    setTBusy(true); setErr("");
+    try { await db.adminSetActive(toggle.id, !toggle.active); await load(); setToggle(null); }
+    catch (e) { setErr(e.message || "Failed to update"); }
+    finally { setTBusy(false); }
+  };
+
+  const operators = (users || []).filter((u) => u.role === "operator");
+  const managers = (users || []).filter((u) => u.role !== "operator");
+
+  return (
+    <>
+      <PageHead title="Team" sub="Add operators and managers · PINs and passwords are generated and shown once" />
+
+      <div className="my-6"><AnimatePresence>{created && <CredentialReveal created={created} onClose={() => setCreated(null)} />}</AnimatePresence>
+        <AnimatePresence>{err && <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><div role="alert" className={`${errCls} mb-4`}><AlertTriangle size={15} className="shrink-0" />{err}</div></m.div>}</AnimatePresence>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Panel title="Add Operator" tag="01">
+            <p className="text-ink-soft text-sm mb-4 -mt-1">Operators log in with a PIN. Just enter the name — a unique 4-digit PIN is generated.</p>
+            <label className={labelCls} htmlFor="op-name">Operator name</label>
+            <input id="op-name" value={opName} onChange={(e) => { setOpName(e.target.value); setErr(""); }} onKeyDown={(e) => e.key === "Enter" && addOperator()} placeholder="e.g. Ravi Kumar" className={`${inputCls} mb-4`} />
+            <MetalButton onClick={addOperator} disabled={!opName.trim() || opBusy} fullWidth className="disabled:opacity-50 disabled:pointer-events-none">{opBusy ? "Adding…" : <><Plus size={18} /> Add Operator</>}</MetalButton>
+          </Panel>
+
+          <Panel title="Add Manager" tag="02">
+            <p className="text-ink-soft text-sm mb-4 -mt-1">Managers log in with a username + password (generated). Admins can manage the team; supervisors can't.</p>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div><label className={labelCls} htmlFor="mg-name">Name</label><input id="mg-name" value={mgName} onChange={(e) => { setMgName(e.target.value); setErr(""); }} placeholder="e.g. Anita Rao" className={inputCls} /></div>
+              <div><label className={labelCls} htmlFor="mg-user">Username</label><input id="mg-user" value={mgUser} onChange={(e) => { setMgUser(e.target.value.toLowerCase()); setErr(""); }} placeholder="anita" className={inputCls} /></div>
+            </div>
+            <label className={labelCls}>Role</label>
+            <div className="grid grid-cols-2 gap-2 mb-5">
+              {[["supervisor", "Supervisor"], ["admin", "Admin"]].map(([id, lbl]) => (
+                <button key={id} onClick={() => setMgRole(id)} aria-pressed={mgRole === id} className={`min-h-[44px] py-2.5 rounded-lg border text-xs font-semibold transition active:scale-95 ${mgRole === id ? "border-brand-500 bg-brand-500/[0.10] text-brand-200 ring-1 ring-brand-500/30" : "border-hair bg-inset text-ink-soft hover:border-brand-500/40"}`}>{lbl}</button>
+              ))}
+            </div>
+            <MetalButton onClick={addManager} disabled={!mgName.trim() || !mgUser.trim() || mgBusy} fullWidth className="disabled:opacity-50 disabled:pointer-events-none">{mgBusy ? "Adding…" : <><Plus size={18} /> Add Manager</>}</MetalButton>
+          </Panel>
+        </div>
+      </div>
+
+      <Panel title="Operators" tag="03" right={<span className="font-mono text-[11px] text-ink-dim">{operators.length} total</span>} className="mb-4">
+        {users === null ? <div className="text-ink-dim text-sm py-6 text-center">Loading…</div>
+          : operators.length === 0 ? <Empty msg="No operators yet — add your first one above." />
+          : <ul className="divide-y divide-hair">
+              {operators.map((u) => (
+                <li key={u.id} className="flex items-center gap-3 py-3">
+                  <span className={`font-semibold text-sm ${u.active ? "text-ink" : "text-ink-dim line-through"}`}>{u.name}</span>
+                  <span className="font-mono text-xs text-ink-soft">PIN {u.login_code}</span>
+                  {!u.active && <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim border border-hair rounded px-1.5 py-0.5">disabled</span>}
+                  <button onClick={() => setToggle(u)} className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">{u.active ? "Deactivate" : "Reactivate"}</button>
+                </li>
+              ))}
+            </ul>}
+      </Panel>
+
+      <Panel title="Managers" tag="04" right={<span className="font-mono text-[11px] text-ink-dim">{managers.length} total</span>}>
+        {users === null ? <div className="text-ink-dim text-sm py-6 text-center">Loading…</div>
+          : managers.length === 0 ? <Empty msg="No managers yet." />
+          : <ul className="divide-y divide-hair">
+              {managers.map((u) => (
+                <li key={u.id} className="flex items-center gap-3 py-3">
+                  <span className={`font-semibold text-sm ${u.active ? "text-ink" : "text-ink-dim line-through"}`}>{u.name}</span>
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-brand-300/80 border border-hair rounded px-1.5 py-0.5">{u.role}</span>
+                  {u.id === user.id && <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim">you</span>}
+                  {!u.active && <span className="font-mono text-[10px] uppercase tracking-wider text-ink-dim border border-hair rounded px-1.5 py-0.5">disabled</span>}
+                  {u.id !== user.id && <button onClick={() => setToggle(u)} className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition">{u.active ? "Deactivate" : "Reactivate"}</button>}
+                </li>
+              ))}
+            </ul>}
+      </Panel>
+
+      <ConfirmDialog
+        open={!!toggle}
+        title={toggle?.active ? "Deactivate this person?" : "Reactivate this person?"}
+        body={toggle ? <>{toggle.active ? <>This blocks <b className="text-ink">{toggle.name}</b> from logging in. Their history is kept and you can reactivate anytime.</> : <>This lets <b className="text-ink">{toggle.name}</b> log in again.</>}</> : null}
+        confirmLabel={toggle?.active ? "Deactivate" : "Reactivate"}
+        danger={toggle?.active}
+        busy={tBusy}
+        onConfirm={confirmToggle}
+        onClose={() => { if (!tBusy) setToggle(null); }}
+      />
+    </>
+  );
+}
+
 function PlanSetup({ data, reload }) {
   const { components, plans } = data;
   const month = curMonth();

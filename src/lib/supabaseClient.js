@@ -180,4 +180,39 @@ export const db = {
   async signOut() {
     await supabase.auth.signOut();
   },
+
+  // ---- ADMIN: team management (admin-only, via the admin-users Edge Function) -
+  // functions.invoke automatically attaches the signed-in admin's JWT as the
+  // Authorization header; the function re-verifies admin role server-side before
+  // touching anything. The privileged key lives only in the function's secrets.
+  async adminListUsers() {
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action: "list" } });
+    if (error) throw new Error((await readFnError(error)) || "Failed to load team");
+    return data?.users || [];
+  },
+  async adminCreateOperator(name) {
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action: "createOperator", name } });
+    if (error) throw new Error((await readFnError(error)) || "Failed to add operator");
+    return data?.operator; // { name, pin }
+  },
+  async adminCreateManager({ name, username, role }) {
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action: "createManager", name, username, role } });
+    if (error) throw new Error((await readFnError(error)) || "Failed to add manager");
+    return data?.manager; // { name, username, role, password }
+  },
+  async adminSetActive(id, active) {
+    const { error } = await supabase.functions.invoke("admin-users", { body: { action: "setActive", id, active } });
+    if (error) throw new Error((await readFnError(error)) || "Failed to update");
+    return true;
+  },
 };
+
+// supabase.functions.invoke wraps non-2xx responses in a FunctionsHttpError whose
+// real message sits in error.context (a Response). Pull it out for a useful toast.
+async function readFnError(error) {
+  try {
+    const ctx = error?.context;
+    if (ctx && typeof ctx.json === "function") { const j = await ctx.json(); return j?.error; }
+  } catch { /* ignore */ }
+  return error?.message;
+}

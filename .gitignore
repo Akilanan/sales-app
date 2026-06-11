@@ -27,3 +27,7 @@ OPERATOR-SECRET.local.txt
 seed-now.ps1
 .seed-key.local
 set-backup-secret.ps1
+
+# company production spreadsheets (raw data, not app)
+*.xls
+*.xlsx

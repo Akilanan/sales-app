@@ -156,4 +156,42 @@ export const db = {
   async listAuditTrail() { return []; },      // demo: no server-side audit
   subscribe() { return () => {}; },           // demo: single-device, no live sync
   async signOut() { /* no session in demo mode */ },
+
+  // ---- ADMIN: team management (demo parity with the Edge Function) ----------
+  async adminListUsers() {
+    const u = (await store.read("users")) || [];
+    return u.map(({ id, name, role, login_code, active, created_at }) => ({ id, name, role, login_code, active, created_at }))
+      .sort((a, b) => (a.role + a.name).localeCompare(b.role + b.name));
+  },
+  async adminCreateOperator(name) {
+    name = String(name || "").trim();
+    if (name.length < 2) throw new Error("Name is required");
+    const users = (await store.read("users")) || [];
+    const taken = new Set(users.map((x) => String(x.login_code || "")));
+    let pin = "";
+    for (let i = 0; i < 200; i++) { const c = String(1000 + Math.floor(Math.random() * 9000)); if (!taken.has(c)) { pin = c; break; } }
+    if (!pin) throw new Error("Could not allocate a free PIN");
+    users.push({ id: uid(), name, role: "operator", login_code: pin, username: null, password: null, active: true });
+    await store.write("users", users);
+    return { name, pin };
+  },
+  async adminCreateManager({ name, username, role }) {
+    name = String(name || "").trim();
+    username = String(username || "").trim().toLowerCase();
+    role = role === "admin" ? "admin" : "supervisor";
+    if (name.length < 2) throw new Error("Name is required");
+    if (!/^[a-z0-9._-]{3,32}$/.test(username)) throw new Error("Username must be 3-32 chars: lowercase letters, digits, . _ -");
+    const users = (await store.read("users")) || [];
+    if (users.some((x) => x.username === username)) throw new Error("That username is already taken");
+    const password = "demo-" + Math.random().toString(36).slice(2, 8);
+    users.push({ id: uid(), name, role, login_code: null, username, password, active: true });
+    await store.write("users", users);
+    return { name, username, role, password };
+  },
+  async adminSetActive(id, active) {
+    const users = (await store.read("users")) || [];
+    const u = users.find((x) => x.id === id);
+    if (u) { u.active = Boolean(active); await store.write("users", users); }
+    return true;
+  },
 };
