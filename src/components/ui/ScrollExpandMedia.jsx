@@ -32,25 +32,6 @@ const REDUCED =
 // The 21st.dev demo's interactive robot-head scene (cursor-tracking).
 const SPLINE_SCENE = "https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode";
 
-// Mount the robot ONLY at lg+ widths. The left panel is `hidden lg:block`, so
-// without this gate Spline still mounts into a display:none container — a
-// zero-size canvas that spams GL_INVALID_FRAMEBUFFER_OPERATION every frame and
-// downloads the multi-MB CDN scene on phones that never show it.
-// 900px (not 1024) so a non-maximised laptop window keeps the robot; real
-// phones (<900) and any low-power device (LOW_POWER) still skip the CDN scene.
-// Must match the `min-[900px]:` breakpoints on the split grid below.
-function useIsDesktop() {
-  const [wide, setWide] = React.useState(
-    () => typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches
-  );
-  React.useEffect(() => {
-    const mq = window.matchMedia("(min-width: 900px)");
-    const onChange = (e) => setWide(e.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-  return wide;
-}
 
 // If the Spline runtime or its CDN scene fails, the panel falls back to the
 // black panel + brand text — never a broken login.
@@ -103,7 +84,10 @@ function BootSequence() {
 }
 
 export default function ScrollExpandMedia({ title, date, scene, children }) {
-  const isDesktop = useIsDesktop();
+  // Show the robot on any CAPABLE device, at ANY width — it's a full-bleed
+  // backdrop, so a narrow IDE-preview panel or snapped window still gets it.
+  // Only reduced-motion and genuinely low-power devices skip the WebGL scene.
+  const showRobot = !REDUCED && !LOW_POWER;
   const firstWord = title ? title.split(" ")[0] : "";
   const restOfTitle = title ? title.split(" ").slice(1).join(" ") : "";
 
@@ -135,63 +119,65 @@ export default function ScrollExpandMedia({ title, date, scene, children }) {
 
   return (
     <div className="relative min-h-[100dvh] w-full overflow-hidden bg-black text-ink">
-      {/* 1 · optional ambient 3D layer (unwired — robot owns the black void) */}
+      {/* 1 · optional ambient 3D layer (unwired) */}
       <div className="absolute inset-0 z-[1]">{scene}</div>
+
+      {/* 1b · THE ROBOT — full-bleed backdrop, ALWAYS mounted on a capable device
+          so it shows at every width (narrow IDE panel, snapped window, phone).
+          Wide (≥900px): biased to the LEFT half so it reads as the hero beside the
+          sign-in card. Narrow: fills the screen; the frosted card floats over it.
+          pointer-events-auto so it still cursor-tracks where uncovered. */}
+      {showRobot && (
+        <SplineErrorBoundary>
+          <div className="absolute inset-0 z-[1] min-[900px]:right-[40%]">
+            <SplineScene scene={SPLINE_SCENE} className="w-full h-full" onLoad={onSplineLoad} />
+          </div>
+        </SplineErrorBoundary>
+      )}
+
+      {/* holographic scan-lines over the whole backdrop */}
+      <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden" aria-hidden="true">
+        <div
+          className="absolute inset-0 opacity-50"
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(to bottom, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 3px)",
+          }}
+        />
+        <div
+          className="absolute inset-x-0 top-0 h-40 motion-safe:[animation:scan-sweep_7s_linear_infinite]"
+          style={{ background: "linear-gradient(to bottom, transparent, rgba(170,220,255,0.07), transparent)" }}
+        />
+      </div>
 
       {/* 2 · spotlight beam */}
       <Spotlight className="-top-40 -left-20 md:left-0 z-[2]" fill="white" />
 
-      {/* 3 · split content — LEFT robot showcase · RIGHT sign-in. One viewport. */}
+      {/* 3 · split content. LEFT cell = brand/boot overlays (wide only,
+          pointer-events-none so the cursor reaches the robot beneath). RIGHT =
+          the frosted sign-in card. */}
       <div className="relative z-10 grid min-h-[100dvh] grid-cols-1 min-[900px]:grid-cols-[1.05fr_0.95fr]">
-        {/* LEFT — interactive Spline robot + holographic overlays */}
-        <m.div {...reveal} className="relative hidden min-[900px]:block">
-          {/* the robot tracks the cursor — needs pointer events, so every overlay
-              above it is pointer-events-none */}
-          {!REDUCED && !LOW_POWER && isDesktop && (
-            <SplineErrorBoundary>
-              <div className="absolute inset-0">
-                <SplineScene scene={SPLINE_SCENE} className="w-full h-full" onLoad={onSplineLoad} />
-              </div>
-            </SplineErrorBoundary>
-          )}
-
-          {/* holographic scan-lines + a slow travelling scan band */}
-          <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-            <div
-              className="absolute inset-0 opacity-60"
-              style={{
-                backgroundImage:
-                  "repeating-linear-gradient(to bottom, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 3px)",
-              }}
-            />
-            <div
-              className="absolute inset-x-0 top-0 h-40 motion-safe:[animation:scan-sweep_7s_linear_infinite]"
-              style={{ background: "linear-gradient(to bottom, transparent, rgba(170,220,255,0.07), transparent)" }}
-            />
-          </div>
-
-          {/* brand + boot sequence, floating above the robot */}
-          <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-12 xl:p-16">
-            <div>
-              {date && (
-                <p className="font-mono text-[11px] uppercase tracking-[0.34em] text-ink-soft/90 flex items-center gap-3">
-                  <span className="h-px w-8 bg-ink-soft/40" aria-hidden="true" />
-                  {date}
-                </p>
-              )}
-              <BootSequence />
-            </div>
-            <div>
-              <h1 className="font-display text-6xl xl:text-7xl font-extrabold tracking-[-0.045em] leading-[0.88] [text-shadow:0_4px_44px_rgba(0,0,0,0.7)]">
-                {firstWord}
-              </h1>
-              <h1 className="font-display text-6xl xl:text-7xl font-extrabold tracking-[-0.045em] leading-[0.88] text-ink-soft [text-shadow:0_4px_44px_rgba(0,0,0,0.7)]">
-                {restOfTitle}
-              </h1>
-              <p className="mt-5 max-w-sm text-ink-soft text-sm leading-relaxed [text-shadow:0_2px_18px_rgba(0,0,0,0.8)]">
-                Daily production planning &amp; Plan-vs-Actual tracking for the CNC floor.
+        {/* LEFT — brand + boot sequence floating over the robot (wide only) */}
+        <m.div {...reveal} className="pointer-events-none relative hidden min-[900px]:flex flex-col justify-between p-12 xl:p-16">
+          <div>
+            {date && (
+              <p className="font-mono text-[11px] uppercase tracking-[0.34em] text-ink-soft/90 flex items-center gap-3">
+                <span className="h-px w-8 bg-ink-soft/40" aria-hidden="true" />
+                {date}
               </p>
-            </div>
+            )}
+            <BootSequence />
+          </div>
+          <div>
+            <h1 className="font-display text-6xl xl:text-7xl font-extrabold tracking-[-0.045em] leading-[0.88] [text-shadow:0_4px_44px_rgba(0,0,0,0.7)]">
+              {firstWord}
+            </h1>
+            <h1 className="font-display text-6xl xl:text-7xl font-extrabold tracking-[-0.045em] leading-[0.88] text-ink-soft [text-shadow:0_4px_44px_rgba(0,0,0,0.7)]">
+              {restOfTitle}
+            </h1>
+            <p className="mt-5 max-w-sm text-ink-soft text-sm leading-relaxed [text-shadow:0_2px_18px_rgba(0,0,0,0.8)]">
+              Daily production planning &amp; Plan-vs-Actual tracking for the CNC floor.
+            </p>
           </div>
         </m.div>
 
