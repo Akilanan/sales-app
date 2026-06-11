@@ -331,14 +331,17 @@ export default function App() {
   const [dataReady, setDataReady] = useState(false); // first post-login fetch landed → swap skeleton for real panels
   const [dir, setDir] = useState(1); // view-swap slide direction (sign of tab-index delta)
   const [month, setMonth] = useState(curMonth()); // the VIEWED month — switchable for history review / pre-planning
+  const [dataMonth, setDataMonth] = useState(curMonth()); // month the loaded `data` is for — when ≠ month, a switch is in flight
   const [live, setLive] = useState(false); // realtime connection state (supabase mode)
 
   useEffect(() => { (async () => { if (CONFIG_ERROR) { setBooting(false); return; } await seedIfEmpty(); setBooting(false); })(); }, []);
 
   const loadData = useCallback(async () => {
+    const m = month; // capture — the month this fetch belongs to
     const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
-    const [plans, entries, operations, machinePlan, settings, users] = await Promise.all([db.getPlans(month), db.listEntries({ month }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(month) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({}), db.listUsersLite ? db.listUsersLite() : Promise.resolve([])]);
+    const [plans, entries, operations, machinePlan, settings, users] = await Promise.all([db.getPlans(m), db.listEntries({ month: m }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(m) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({}), db.listUsersLite ? db.listUsersLite() : Promise.resolve([])]);
     setData({ components, machines, plans, entries, operations, machinePlan, settings, users });
+    setDataMonth(m); // mark which month the loaded data is for (drives the switch-skeleton)
   }, [month]);
 
   // Month switch → refetch (skip while logged out / before the first fetch).
@@ -437,19 +440,27 @@ export default function App() {
           </header>
           <div className="pt-20 pb-28 lg:pb-0">
             <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
-              <AnimatePresence mode="wait" custom={dir}>
-                <m.div key={dataReady ? view : "skeleton"} custom={dir} variants={viewV} initial="enter" animate="center" exit="exit">
-                  {!dataReady ? <ViewSkeleton /> : (
-                    <>
-                      {view === "dashboard" && <Dashboard data={data} live={live} setView={go} month={month} />}
-                      {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} month={month} />}
-                      {view === "plan" && <PlanSetup data={data} reload={loadData} month={month} setMonth={setMonth} />}
-                      {view === "loading" && <MachineLoading data={data} reload={loadData} month={month} />}
-                      {view === "team" && <TeamAdmin user={user} />}
-                    </>
-                  )}
-                </m.div>
-              </AnimatePresence>
+              {/* show a skeleton while a MONTH SWITCH is in flight (data screens only)
+                  so the old month's numbers don't linger under the new header */}
+              {(() => {
+                const monthSwitching = dataReady && month !== dataMonth && view !== "team";
+                const showSkeleton = !dataReady || monthSwitching;
+                return (
+                  <AnimatePresence mode="wait" custom={dir}>
+                    <m.div key={showSkeleton ? "skeleton" : view} custom={dir} variants={viewV} initial="enter" animate="center" exit="exit">
+                      {showSkeleton ? <ViewSkeleton /> : (
+                        <>
+                          {view === "dashboard" && <Dashboard data={data} live={live} setView={go} month={month} />}
+                          {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} month={month} />}
+                          {view === "plan" && <PlanSetup data={data} reload={loadData} month={month} setMonth={setMonth} />}
+                          {view === "loading" && <MachineLoading data={data} reload={loadData} month={month} />}
+                          {view === "team" && <TeamAdmin user={user} />}
+                        </>
+                      )}
+                    </m.div>
+                  </AnimatePresence>
+                );
+              })()}
             </main>
           </div>
         </m.div>
@@ -649,8 +660,10 @@ function Dashboard({ data, live, month = curMonth() }) {
   const isPast = month < curMonth();
 
   const totalMonthly = plans.reduce((s, p) => s + p.target_qty, 0);
-  const dailyTargetTotal = plans.reduce((s, p) => s + p.target_qty / p.working_days, 0);
+  // guard working_days===0 (a degenerate plan row would make target/0 = Infinity → NaN everywhere)
+  const dailyTargetTotal = plans.reduce((s, p) => s + (p.working_days ? p.target_qty / p.working_days : 0), 0);
   const actualMonthly = entries.reduce((s, e) => s + e.quantity, 0);
+  const noPlan = totalMonthly === 0; // this month was never planned — show a neutral state, not a false "On Track"
   const today = todayStr();
   const todayEntries = entries.filter((e) => e.production_date === today);
   const actualToday = todayEntries.reduce((s, e) => s + e.quantity, 0);
@@ -663,7 +676,8 @@ function Dashboard({ data, live, month = curMonth() }) {
   const expectedSoFar = Math.min(dailyTargetTotal * workingDaysElapsed, totalMonthly);
   const pace = expectedSoFar ? actualMonthly / expectedSoFar : 1;
   const lvl = levelForPace(pace);
-  const paceText = !isCurrent && !isPast ? "Future month — plan preview"
+  const paceText = noPlan ? "No plan set for this month"
+    : !isCurrent && !isPast ? "Future month — plan preview"
     : isPast ? (lvl === "ok" ? "Month closed at or above plan" : lvl === "warn" ? "Month closed slightly under plan" : "Month closed under plan")
     : lvl === "ok" ? "On track to hit the monthly plan" : lvl === "warn" ? "Slightly behind the expected pace" : "Behind the expected pace — needs attention";
   const paceDelta = actualMonthly - expectedSoFar;
@@ -726,15 +740,19 @@ function Dashboard({ data, live, month = curMonth() }) {
             </div>
           </div>
           <div className="sm:text-right">
-            <div className="flex items-center gap-2 sm:justify-end">
-              <StatusPill level={lvl} size="lg" />
-              <VarianceChip delta={paceDelta} pct={pacePct} level={lvl} />
-            </div>
-            <div className="text-ink-soft text-sm mt-2 max-w-xs">{monthlyPct}% of plan · {paceText}</div>
+            {noPlan ? (
+              <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-dim border border-hair rounded-lg px-2.5 py-1 inline-block">No plan</div>
+            ) : (
+              <div className="flex items-center gap-2 sm:justify-end">
+                <StatusPill level={lvl} size="lg" />
+                <VarianceChip delta={paceDelta} pct={pacePct} level={lvl} />
+              </div>
+            )}
+            <div className="text-ink-soft text-sm mt-2 max-w-xs">{noPlan ? paceText : `${monthlyPct}% of plan · ${paceText}`}</div>
           </div>
         </div>
         <div className="relative h-1.5 bg-inset">
-          <m.div initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.85, ease: ease.out }} className="h-full origin-left" style={{ width: `${Math.min(monthlyPct, 100)}%`, background: STATUS[lvl].hex }} />
+          <m.div initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.85, ease: ease.out }} className="h-full origin-left" style={{ width: `${Math.min(monthlyPct, 100)}%`, background: noPlan ? "#3F3F46" : STATUS[lvl].hex }} />
           {[25, 50, 75].map((t) => <span key={t} className="absolute top-0 bottom-0 w-px bg-base/70" style={{ left: `${t}%` }} />)}
         </div>
       </div>
@@ -1090,9 +1108,9 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
   // Destructive: only runs after the focus-trapped ConfirmDialog is confirmed.
   const confirmDeleteEntry = async () => {
     if (delBusy || !delEntry) return;
-    setDelBusy(true);
+    setDelBusy(true); setError("");
     try { await db.removeEntry(delEntry.id); await reload(); setDelEntry(null); }
-    catch { /* leave the dialog open so the user can retry */ }
+    catch (e) { setError(e?.message || "Couldn't delete that entry — please retry."); }
     finally { setDelBusy(false); }
   };
 
@@ -2120,12 +2138,13 @@ function OperationsPanel({ data, reload }) {
   };
   const editField = async (id, field, value) => {
     const v = field === "description" ? value : (parseFloat(value) || 0);
-    try { await db.updateOperation(id, { [field]: v }); await reload(); } catch { /* keep value */ }
+    // surface failures — a silently-swallowed reject left the cell looking saved when it wasn't
+    try { setErr(""); await db.updateOperation(id, { [field]: v }); await reload(); } catch (e) { setErr(e?.message || "That operation change didn't save — please retry."); }
   };
   const confirmDel = async () => {
-    if (delBusy || !delOp) return; setDelBusy(true);
+    if (delBusy || !delOp) return; setDelBusy(true); setErr("");
     try { await db.removeOperation(delOp.id); await reload(); setDelOp(null); }
-    catch { /* keep dialog */ } finally { setDelBusy(false); }
+    catch (e) { setErr(e?.message || "Couldn't delete that operation — please retry."); } finally { setDelBusy(false); }
   };
 
   return (
@@ -2290,7 +2309,7 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth }) {
             </tr></thead>
             <tbody>
               {components.map((c) => {
-                const p = planFor(c.id); const target = p?.target_qty ?? 0; const wd = p?.working_days ?? 24; const daily = target / wd;
+                const p = planFor(c.id); const target = p?.target_qty ?? 0; const wd = p?.working_days || 24; const daily = target / wd;
                 return (
                   <tr key={c.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025] transition">
                     <td className="py-3 px-2.5"><input defaultValue={c.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.name) editComp(c.id, { name: v }); else e.target.value = c.name; }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} aria-label={`Name of ${c.name}`} className="w-full min-w-[150px] px-2.5 py-2 min-h-[44px] bg-transparent border border-transparent hover:border-hair-strong focus:border-brand-500 focus:bg-inset rounded-lg font-semibold text-sm text-ink outline-none transition" /></td>

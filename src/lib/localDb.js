@@ -36,7 +36,7 @@ const store = {
 
 // Bump when the seed data changes shape — existing browsers wipe + reseed so
 // nobody is left looking at the previous (fake) factory.
-const SEED_VERSION = "2-real-factory";
+const SEED_VERSION = "3-real-factory-history";
 const SEED_TABLES = [
   "users", "machines", "components", "monthly_plans", "production_entries",
   "component_operations", "machine_plan_lines", "app_settings",
@@ -148,6 +148,36 @@ export async function seedIfEmpty() {
         { id: uid(), production_date: daysAgo(2), shift: 2, component_id: compBy["SPX"].id, machine_id: machineBy["VMC-2"].id, operator_id: operators[1].id, quantity: 2, scrap_qty: 0, notes: "", created_at: Date.now() - 2 * 86400000 },
         { id: uid(), production_date: daysAgo(1), shift: 1, component_id: compBy["5048A"].id, machine_id: machineBy["VMC-2"].id, operator_id: operators[2].id, quantity: 1, scrap_qty: 0, notes: "", created_at: Date.now() - 1 * 86400000 },
       );
+    }
+
+    // PRIOR (closed) MONTH — so the ‹ › month switcher demos real history, not an
+    // empty screen. Same plan + loading; a full month of logged output (Sundays off)
+    // landing near plan, so the closed-month dashboard reads completed.
+    const [cy2, cm2] = curMonth().split("-").map(Number);
+    const pdt = new Date(cy2, cm2 - 2, 1);
+    const prevYM = `${pdt.getFullYear()}-${String(pdt.getMonth() + 1).padStart(2, "0")}`;
+    const prevMonth = `${prevYM}-01`;
+    const prevDays = new Date(pdt.getFullYear(), pdt.getMonth() + 1, 0).getDate();
+    monthly_plans.push(...components.map((c, i) => ({ id: uid(), month: prevMonth, component_id: c.id, target_qty: seed[i].target, working_days: 24 })));
+    machine_plan_lines.push(...PLAN_DEFS.map(([mc, cc, qty], i) => ({ id: uid(), month: prevMonth, machine_id: machineBy[mc].id, component_id: compBy[cc].id, qty, seq: i + 1, active: true, created_at: new Date().toISOString() })));
+    for (let dd = 1; dd <= prevDays; dd++) {
+      const dt = new Date(pdt.getFullYear(), pdt.getMonth(), dd);
+      if (dt.getDay() === 0) continue; // Sundays off
+      const ds = dt.toLocaleDateString("en-CA");
+      components.forEach((c, i) => {
+        const perShift = (seed[i].target / 24) / 3;
+        // nudge each line's closed-month pace toward ~100% so the month reads finished
+        const perf = 0.6 * (perfBy[c.id] || 0) + 0.4 * (perfBy[c.id] ? 1 : 0);
+        if (perShift * perf < 0.15) return;
+        SHIFTS.forEach((s) => {
+          entries.push({
+            id: uid(), production_date: ds, shift: s, component_id: c.id,
+            machine_id: randOf(machines).id, operator_id: randOf(operators).id,
+            quantity: Math.max(0, Math.round(perShift * perf * (0.9 + Math.random() * 0.2))),
+            scrap_qty: Math.random() < 0.15 ? 1 : 0, notes: "", created_at: pdt.getTime() + dd * 86400000,
+          });
+        });
+      });
     }
 
     await store.write("users", users);
