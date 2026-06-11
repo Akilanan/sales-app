@@ -15,6 +15,7 @@ import ScrollExpandMedia from "./components/ui/ScrollExpandMedia";
 import { LiquidButton, MetalButton } from "./components/ui/buttons";
 import { NavBar } from "./components/ui/tubelight-navbar";
 import { EtheralShadow } from "./components/ui/etheral-shadow";
+import { opHours, componentCapacity, round1, round2 } from "./lib/capacity";
 
 // Login hero imagery (industrial). onError in ScrollExpandMedia falls back from
 // the expanding media to the background photo, so a 404 never shows a broken icon.
@@ -314,7 +315,7 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
   const [view, setView] = useState("dashboard");
-  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [] });
+  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [] });
   const [live, setLive] = useState(false); // realtime connection state (supabase mode)
 
   const appStatus = useMemo(() => {
@@ -330,8 +331,8 @@ export default function App() {
 
   const loadData = useCallback(async () => {
     const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
-    const [plans, entries] = await Promise.all([db.getPlans(curMonth()), db.listEntries({ month: curMonth() })]);
-    setData({ components, machines, plans, entries });
+    const [plans, entries, operations] = await Promise.all([db.getPlans(curMonth()), db.listEntries({ month: curMonth() }), db.listOperations ? db.listOperations() : Promise.resolve([])]);
+    setData({ components, machines, plans, entries, operations });
   }, []);
 
   const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); await loadData(); };
@@ -1205,6 +1206,106 @@ function TeamAdmin({ user }) {
   );
 }
 
+// Phase 1: Routing & Capacity — define each part's operations (op no, cycle,
+// setup, insertion time) and see the machine/labour hours and DAYS computed with
+// Akilan's exact Excel formulas. The day count is what drives capacity planning.
+function OperationsPanel({ data, reload }) {
+  const { components, plans, operations } = data;
+  const active = components.filter((c) => c.active !== false);
+  const [selId, setSelId] = useState(active[0]?.id || "");
+  const sel = active.find((c) => c.id === selId) || active[0];
+  const planFor = (cid) => plans.find((p) => p.component_id === cid);
+
+  const [opNo, setOpNo] = useState(""); const [desc, setDesc] = useState("");
+  const [cyc, setCyc] = useState(""); const [setup, setSetup] = useState(""); const [ins, setIns] = useState("60");
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const [delOp, setDelOp] = useState(null); const [delBusy, setDelBusy] = useState(false);
+
+  if (!sel) return <Panel title="Routing & Capacity" tag="04"><Empty msg="Add a component above first, then define its operations here." /></Panel>;
+
+  const ops = (operations || []).filter((o) => o.component_id === sel.id).sort((a, b) => a.op_no - b.op_no);
+  const qty = planFor(sel.id)?.target_qty ?? 0;
+  const wd = planFor(sel.id)?.working_days ?? 24;
+  const cap = componentCapacity(ops, qty);
+
+  const addOp = async () => {
+    if (busy || !opNo) return; setBusy(true); setErr("");
+    try {
+      await db.addOperation({ component_id: sel.id, op_no: parseInt(opNo, 10), description: desc.trim(), cycle_time: parseFloat(cyc) || 0, setup_time: parseFloat(setup) || 0, insertion_time: parseFloat(ins) || 0 });
+      setOpNo(""); setDesc(""); setCyc(""); setSetup(""); setIns("60"); await reload();
+    } catch (e) { setErr(e.message || "Failed to add operation"); }
+    finally { setBusy(false); }
+  };
+  const editField = async (id, field, value) => {
+    const v = field === "description" ? value : (parseFloat(value) || 0);
+    try { await db.updateOperation(id, { [field]: v }); await reload(); } catch { /* keep value */ }
+  };
+  const confirmDel = async () => {
+    if (delBusy || !delOp) return; setDelBusy(true);
+    try { await db.removeOperation(delOp.id); await reload(); setDelOp(null); }
+    catch { /* keep dialog */ } finally { setDelBusy(false); }
+  };
+
+  return (
+    <Panel title="Routing & Capacity" tag="04" right={
+      <select value={selId} onChange={(e) => setSelId(e.target.value)} className="bg-inset border border-hair rounded-lg text-sm text-ink px-3 py-2 font-semibold outline-none focus:border-brand-500 max-w-[200px]">
+        {active.map((c) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` · ${c.code}` : ""}</option>)}
+      </select>
+    }>
+      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 mb-4 text-sm">
+        <span className="text-ink-soft">Capacity for <b className="text-ink">{sel.name}</b> at <b className="text-ink font-mono tnum">{qty}</b> pcs:</span>
+        <span className="font-mono text-ink-soft">MC <b className="text-ink tnum">{round1(cap.mc)}</b>h</span>
+        <span className="font-mono text-ink-soft">LB <b className="text-ink tnum">{round1(cap.lb)}</b>h</span>
+        <span className="font-mono text-ink-soft">Eff <b className="text-ink tnum">{round1(cap.eff)}</b>h</span>
+        <span className={`font-mono font-bold tnum ${cap.days > wd ? "text-bad-ink" : "text-ok-ink"}`}>{round1(cap.days)} days{cap.days > wd ? ` · over ${wd}!` : ` / ${wd}`}</span>
+      </div>
+
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full min-w-[680px]">
+          <thead><tr className="text-left font-mono text-ink-dim text-[10px] font-semibold uppercase tracking-[0.14em] border-b border-hair">
+            <th className="py-2.5 px-2">Op</th><th className="py-2.5 px-2">Description</th>
+            <th className="py-2.5 px-2 text-right">Cycle (s)</th><th className="py-2.5 px-2 text-right">Setup (s)</th><th className="py-2.5 px-2 text-right">Ins (s)</th>
+            <th className="py-2.5 px-2 text-right">MC h</th><th className="py-2.5 px-2 text-right">Eff h</th><th className="py-2.5 px-2 text-right">Days</th><th className="py-2.5 px-2 w-10" />
+          </tr></thead>
+          <tbody>
+            {ops.length === 0 ? <tr><td colSpan={9} className="py-5"><Empty msg={`No operations for ${sel.name} yet — add the first below.`} /></td></tr>
+              : ops.map((o) => {
+                const h = opHours({ qty, cycle_time: o.cycle_time, setup_time: o.setup_time, insertion_time: o.insertion_time });
+                return (
+                  <tr key={o.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025] transition">
+                    <td className="py-2.5 px-2"><input type="number" defaultValue={o.op_no} onBlur={(e) => editField(o.id, "op_no", e.target.value)} className={`${cellCls} w-16`} /></td>
+                    <td className="py-2.5 px-2"><input defaultValue={o.description || ""} placeholder="—" onBlur={(e) => editField(o.id, "description", e.target.value)} className="w-full min-w-[120px] px-2.5 py-2 bg-inset border border-hair-strong rounded-lg text-ink text-sm outline-none focus:border-brand-500" /></td>
+                    <td className="py-2.5 px-2 text-right"><input type="number" defaultValue={o.cycle_time} onBlur={(e) => editField(o.id, "cycle_time", e.target.value)} className={`${cellCls} w-20`} /></td>
+                    <td className="py-2.5 px-2 text-right"><input type="number" defaultValue={o.setup_time} onBlur={(e) => editField(o.id, "setup_time", e.target.value)} className={`${cellCls} w-20`} /></td>
+                    <td className="py-2.5 px-2 text-right"><input type="number" defaultValue={o.insertion_time} onBlur={(e) => editField(o.id, "insertion_time", e.target.value)} className={`${cellCls} w-16`} /></td>
+                    <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round2(h.mc)}</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round2(h.eff)}</td>
+                    <td className="py-2.5 px-2 text-right font-mono font-bold text-brand-300 tnum">{round2(h.days)}</td>
+                    <td className="py-2.5 px-2"><button onClick={() => setDelOp(o)} aria-label={`Remove operation ${o.op_no}`} className="p-2 min-h-[40px] min-w-[40px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={14} /></button></td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* add operation */}
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-6 gap-2.5 items-end">
+        <div><label className={labelCls}>Op No</label><input type="number" value={opNo} onChange={(e) => { setOpNo(e.target.value); setErr(""); }} placeholder="40" className={inputCls} /></div>
+        <div className="col-span-2 sm:col-span-1"><label className={labelCls}>Description</label><input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Rough mill" className={inputCls} /></div>
+        <div><label className={labelCls}>Cycle (s)</label><input type="number" value={cyc} onChange={(e) => setCyc(e.target.value)} placeholder="28" className={inputCls} /></div>
+        <div><label className={labelCls}>Setup (s)</label><input type="number" value={setup} onChange={(e) => setSetup(e.target.value)} placeholder="56" className={inputCls} /></div>
+        <div><label className={labelCls}>Ins (s)</label><input type="number" value={ins} onChange={(e) => setIns(e.target.value)} placeholder="60" className={inputCls} /></div>
+        <MetalButton onClick={addOp} disabled={!opNo || busy} fullWidth className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add Op</>}</MetalButton>
+      </div>
+      {err && <div role="alert" className={`${errCls} mt-3`}><AlertTriangle size={15} className="shrink-0" />{err}</div>}
+      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Hours and days use your exact sheet formula: MC = (qty×cycle + setup + ins)/60, LB = MC/12, Eff = total×1.05, Days = Eff/17. Edit any cell and click away to save.</span></div>
+
+      <ConfirmDialog open={!!delOp} title="Remove this operation?" body={delOp ? <>Remove <b className="text-ink">Op {delOp.op_no}</b>{delOp.description ? ` (${delOp.description})` : ""} from {sel.name}'s routing?</> : null} confirmLabel="Remove operation" danger busy={delBusy} onConfirm={confirmDel} onClose={() => { if (!delBusy) setDelOp(null); }} />
+    </Panel>
+  );
+}
+
 function PlanSetup({ data, reload }) {
   const { components, plans } = data;
   const month = curMonth();
@@ -1283,6 +1384,8 @@ function PlanSetup({ data, reload }) {
         </div>
         <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Edit a target or working days and click away (or press Enter) to save. Removing a component hides it but keeps its production history.</span></div>
       </Panel>
+
+      <div className="mt-4"><OperationsPanel data={data} reload={reload} /></div>
 
       <ConfirmDialog
         open={!!delComp}

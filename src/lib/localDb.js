@@ -115,6 +115,29 @@ export const db = {
     await store.write("components", [...rows, row]);
     return row;
   },
+  // ---- OPERATIONS (routing — Phase 1) · demo parity --------------------------
+  async listOperations() {
+    const ops = (await store.read("component_operations")) || [];
+    return ops.filter((o) => o.active !== false).sort((a, b) => (a.component_id + String(a.op_no).padStart(4, "0")).localeCompare(b.component_id + String(b.op_no).padStart(4, "0")));
+  },
+  async addOperation({ component_id, op_no, description, cycle_time, setup_time, insertion_time }) {
+    const ops = (await store.read("component_operations")) || [];
+    if (ops.some((o) => o.component_id === component_id && Number(o.op_no) === Number(op_no) && o.active !== false))
+      throw new Error(`Operation ${op_no} already exists for this part`);
+    const row = { id: uid(), component_id, op_no: Number(op_no), description: description || null, cycle_time: Number(cycle_time) || 0, setup_time: Number(setup_time) || 0, insertion_time: insertion_time ?? 60, active: true, created_at: new Date().toISOString() };
+    ops.push(row); await store.write("component_operations", ops);
+    return row;
+  },
+  async updateOperation(id, fields) {
+    const ops = (await store.read("component_operations")) || [];
+    const o = ops.find((x) => x.id === id);
+    if (o) { Object.assign(o, fields); await store.write("component_operations", ops); }
+  },
+  async removeOperation(id) {
+    let ops = (await store.read("component_operations")) || [];
+    ops = ops.filter((o) => o.id !== id); await store.write("component_operations", ops);
+  },
+
   async deactivateComponent(id) {
     const rows = (await store.read("components")) || [];
     await store.write("components", rows.map((c) => (c.id === id ? { ...c, active: false } : c)));

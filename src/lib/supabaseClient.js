@@ -98,6 +98,32 @@ export const db = {
     if (error) throw error;
   },
 
+  // ---- OPERATIONS (routing — Phase 1 of the planning module) ----------------
+  async listOperations() {
+    const { data, error } = await supabase
+      .from("component_operations").select("*").eq("active", true)
+      .order("component_id").order("op_no");
+    if (error) throw error;
+    return data;
+  },
+  async addOperation({ component_id, op_no, description, cycle_time, setup_time, insertion_time }) {
+    const { data, error } = await supabase.from("component_operations").insert({
+      component_id, op_no, description: description || null,
+      cycle_time: cycle_time || 0, setup_time: setup_time || 0,
+      insertion_time: insertion_time ?? 60,
+    }).select().single();
+    if (error) throw error;
+    return data;
+  },
+  async updateOperation(id, fields) {
+    const { error } = await supabase.from("component_operations").update(fields).eq("id", id);
+    if (error) throw error;
+  },
+  async removeOperation(id) {
+    const { error } = await supabase.from("component_operations").delete().eq("id", id);
+    if (error) throw error;
+  },
+
   // ---- MACHINES ------------------------------------------------------------
   async listMachines() {
     const { data, error } = await supabase
