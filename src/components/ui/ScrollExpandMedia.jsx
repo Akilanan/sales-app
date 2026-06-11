@@ -36,12 +36,15 @@ const SPLINE_SCENE = "https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splineco
 // without this gate Spline still mounts into a display:none container — a
 // zero-size canvas that spams GL_INVALID_FRAMEBUFFER_OPERATION every frame and
 // downloads the multi-MB CDN scene on phones that never show it.
+// 900px (not 1024) so a non-maximised laptop window keeps the robot; real
+// phones (<900) and any low-power device (LOW_POWER) still skip the CDN scene.
+// Must match the `min-[900px]:` breakpoints on the split grid below.
 function useIsDesktop() {
   const [wide, setWide] = React.useState(
-    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches
   );
   React.useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
+    const mq = window.matchMedia("(min-width: 900px)");
     const onChange = (e) => setWide(e.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
@@ -139,9 +142,9 @@ export default function ScrollExpandMedia({ title, date, scene, children }) {
       <Spotlight className="-top-40 -left-20 md:left-0 z-[2]" fill="white" />
 
       {/* 3 · split content — LEFT robot showcase · RIGHT sign-in. One viewport. */}
-      <div className="relative z-10 grid min-h-[100dvh] grid-cols-1 lg:grid-cols-[1.05fr_0.95fr]">
+      <div className="relative z-10 grid min-h-[100dvh] grid-cols-1 min-[900px]:grid-cols-[1.05fr_0.95fr]">
         {/* LEFT — interactive Spline robot + holographic overlays */}
-        <m.div {...reveal} className="relative hidden lg:block">
+        <m.div {...reveal} className="relative hidden min-[900px]:block">
           {/* the robot tracks the cursor — needs pointer events, so every overlay
               above it is pointer-events-none */}
           {!REDUCED && !LOW_POWER && isDesktop && (
@@ -195,7 +198,7 @@ export default function ScrollExpandMedia({ title, date, scene, children }) {
         {/* RIGHT — sign-in on a frosted panel with a cursor-following sheen */}
         <m.div
           {...revealCard}
-          className="relative flex items-center justify-center px-6 py-10 sm:px-10 min-h-[100dvh] lg:min-h-0 lg:border-l lg:border-hair lg:bg-base/45 lg:backdrop-blur-xl"
+          className="relative flex items-center justify-center px-6 py-10 sm:px-10 min-h-[100dvh] min-[900px]:min-h-0 min-[900px]:border-l min-[900px]:border-hair min-[900px]:bg-base/45 min-[900px]:backdrop-blur-xl"
         >
           {!REDUCED && <CursorSpotlight size={340} />}
           {children}
