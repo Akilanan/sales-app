@@ -12,14 +12,27 @@
 //   Only then do we use the SECRET key to create/modify auth users.
 //   A forged/absent token -> 401. A valid non-admin -> 403.
 //
-// Function secrets required:
-//   SUPABASE_SECRET_KEY  - an sb_secret_... key (admin API; bypasses RLS).
-//   OPERATOR_SECRET      - same value the operators were seeded with (so the
-//                          PIN -> password scheme matches operator-login).
+// Secret key: read from the platform-provided SUPABASE_SECRET_KEYS (a JSON dict
+// of the project's sb_secret_ keys, keyed by name) — no manual secret needed.
+// (Custom function secrets can't use the reserved SUPABASE_ prefix; ADMIN_SECRET_KEY
+//  and the legacy service_role var are fallbacks.)
+// Function secret still required:
+//   OPERATOR_SECRET - same value the operators were seeded with (PIN->password).
 //   SUPABASE_URL is injected by the platform.
 // ============================================================================
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+function getSecretKey(): string | null {
+  const raw = Deno.env.get("SUPABASE_SECRET_KEYS");
+  if (raw) {
+    try {
+      const d = JSON.parse(raw);
+      return d["default"] || (Object.values(d)[0] as string) || null;
+    } catch { /* not JSON — fall through */ }
+  }
+  return Deno.env.get("ADMIN_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || null;
+}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -39,7 +52,7 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const url = Deno.env.get("SUPABASE_URL");
-  const secret = Deno.env.get("SUPABASE_SECRET_KEY");
+  const secret = getSecretKey();
   const operatorSecret = Deno.env.get("OPERATOR_SECRET");
   if (!url || !secret || !operatorSecret) return json({ error: "Server not configured" }, 500);
 
