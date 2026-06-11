@@ -16,6 +16,7 @@ import { LiquidButton, MetalButton } from "./components/ui/buttons";
 import { NavBar } from "./components/ui/tubelight-navbar";
 import { EtheralShadow } from "./components/ui/etheral-shadow";
 import { opHours, componentCapacity, round1, round2 } from "./lib/capacity";
+import { scheduleMachine, monthBounds, fmtDate } from "./lib/schedule";
 
 // Login hero imagery (industrial). onError in ScrollExpandMedia falls back from
 // the expanding media to the background photo, so a 404 never shows a broken icon.
@@ -1208,6 +1209,50 @@ function TeamAdmin({ user }) {
   );
 }
 
+/* ------------------------ Machine Schedule (Phase 3) ---------------------- */
+// Auto start/end dates per operation (sequential, Sundays off) + a month
+// timeline, mirroring the Start Date / End Date columns in the sheets.
+function MachineSchedule({ machine, lines, operations, components }) {
+  const opsByComp = {};
+  for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
+  const rows = scheduleMachine(lines, opsByComp, curMonth());
+  const { first, last, totalMs } = monthBounds(curMonth());
+  const nameOf = (id) => (components || []).find((c) => c.id === id)?.name || "?";
+
+  if (!rows.length) {
+    return <Panel title="Schedule" tag="03" className="mt-4"><Empty msg="Add parts (with operations defined) to see the auto-scheduled timeline." /></Panel>;
+  }
+  const span = rows.length ? { s: rows[0].start, e: rows[rows.length - 1].end } : null;
+  // day ticks across the month (about 6)
+  const ticks = [];
+  for (let i = 0; i <= 5; i++) { const t = new Date(first.getTime() + (totalMs * i) / 5); ticks.push(t); }
+
+  return (
+    <Panel title="Schedule" tag="03" right={span ? <span className="font-mono text-[11px] text-ink-dim">{fmtDate(span.s)} → {fmtDate(span.e)}</span> : null} className="mt-4">
+      {/* timeline header */}
+      <div className="flex justify-between font-mono text-[10px] text-ink-dim mb-1 px-1">
+        {ticks.map((t, i) => <span key={i}>{fmtDate(t)}</span>)}
+      </div>
+      <div className="space-y-1.5">
+        {rows.map((r, i) => {
+          const left = Math.max(0, ((r.start.getTime() - first.getTime()) / totalMs) * 100);
+          const width = Math.max(1.5, ((r.end.getTime() - r.start.getTime()) / totalMs) * 100);
+          return (
+            <div key={i} className="flex items-center gap-3">
+              <div className="w-40 shrink-0 truncate text-[12px]"><span className="font-semibold text-ink">{nameOf(r.component_id)}</span> <span className="font-mono text-ink-dim">op{r.op_no}</span></div>
+              <div className="relative flex-1 h-6 rounded bg-inset/60 overflow-hidden">
+                <div className="absolute top-0 h-full rounded bg-gradient-to-r from-brand-500/70 to-brand-400/60 border border-brand-400/40" style={{ left: `${Math.min(left, 98)}%`, width: `${Math.min(width, 100 - Math.min(left, 98))}%` }} title={`${fmtDate(r.start)} → ${fmtDate(r.end)} · ${round1(r.days)}d`} />
+              </div>
+              <div className="w-32 shrink-0 text-right font-mono text-[11px] text-ink-soft tnum">{fmtDate(r.start)}→{fmtDate(r.end)}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Operations run one after another on the machine (Sundays off), starting from the 1st. Dates auto-update when you change quantities or operations.</span></div>
+    </Panel>
+  );
+}
+
 /* --------------------- Machine Loading (Phase 2) -------------------------- */
 // Per-machine monthly plan: assign parts + quantities to each machine; the app
 // expands each over the part's operations (Phase 1) and rolls up the machine's
@@ -1330,6 +1375,9 @@ function MachineLoading({ data, reload }) {
         {err && <div role="alert" className={`${errCls} mt-3`}><AlertTriangle size={15} className="shrink-0" />{err}</div>}
         <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Each part's days come from its operations (Plan Setup → Routing). If a part shows "none" ops, define its operations there first. Over 100% means the machine is overbooked for the month.</span></div>
       </Panel>
+
+      {/* Phase 3: auto schedule — operations sequenced with start/end dates */}
+      <MachineSchedule machine={sel} lines={lines} operations={operations} components={components} />
 
       <ConfirmDialog open={!!delLine} title="Remove from machine plan?" body={delLine ? <>Remove <b className="text-ink">{compName(delLine.component_id)}</b> from {sel.name}'s plan?</> : null} confirmLabel="Remove" danger busy={delBusy} onConfirm={confirmDel} onClose={() => { if (!delBusy) setDelLine(null); }} />
     </>
