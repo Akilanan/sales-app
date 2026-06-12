@@ -1,5 +1,7 @@
 # Design
 
+⚠️ **SUPERSEDED (June 2026).** The live direction is **"shadcn premium" — MONOCHROME zinc** (grayscale charts where brightness = urgency, LiquidButton glass + MetalButton silver, tubelight pill nav, Spline-robot login on pure black). Everything below (Command Deck cyan, sidebar nav) is HISTORY — do not re-apply it. The shipped app (`src/`) is the source of truth.
+
 > Visual system for Prana Venture's production console. Direction: **Command Deck** — the data-driven best-of-all-621-Aura systems (Linear/Geist-grade), the standard `/polish` and `/audit` hold edits to.
 >
 > **Command Deck deltas (current — override the Tactical values below where they conflict):**
