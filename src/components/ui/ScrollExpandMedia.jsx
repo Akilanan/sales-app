@@ -120,7 +120,7 @@ export default function ScrollExpandMedia({ title, date, scene, children }) {
   return (
     <div className="relative min-h-[100dvh] w-full overflow-hidden bg-black text-ink">
       {/* 1 · optional ambient 3D layer (unwired) */}
-      <div className="absolute inset-0 z-[1]">{scene}</div>
+      <div className="pointer-events-none absolute inset-0 z-[1]">{scene}</div>
 
       {/* 1b · THE ROBOT — full-bleed backdrop, ALWAYS mounted on a capable device
           so it shows at every width (narrow IDE panel, snapped window, phone).
@@ -153,10 +153,11 @@ export default function ScrollExpandMedia({ title, date, scene, children }) {
       {/* 2 · spotlight beam */}
       <Spotlight className="-top-40 -left-20 md:left-0 z-[2]" fill="white" />
 
-      {/* 3 · split content. LEFT cell = brand/boot overlays (wide only,
-          pointer-events-none so the cursor reaches the robot beneath). RIGHT =
-          the frosted sign-in card. */}
-      <div className="relative z-10 grid min-h-[100dvh] grid-cols-1 min-[900px]:grid-cols-[1.05fr_0.95fr]">
+      {/* 3 · split content. The grid CONTAINER is pointer-events-none so the
+          cursor passes THROUGH to the robot canvas beneath (z-1) — the robot's
+          cursor-tracking only works if events reach it. Only the sign-in card
+          re-enables pointer events. LEFT cell = brand/boot overlays (wide only). */}
+      <div className="pointer-events-none relative z-10 grid min-h-[100dvh] grid-cols-1 min-[900px]:grid-cols-[1.05fr_0.95fr]">
         {/* LEFT — brand + boot sequence floating over the robot (wide only) */}
         <m.div {...reveal} className="pointer-events-none relative hidden min-[900px]:flex flex-col justify-between p-12 xl:p-16">
           <div>
@@ -181,10 +182,12 @@ export default function ScrollExpandMedia({ title, date, scene, children }) {
           </div>
         </m.div>
 
-        {/* RIGHT — sign-in on a frosted panel with a cursor-following sheen */}
+        {/* RIGHT — sign-in on a frosted panel with a cursor-following sheen.
+            pointer-events-auto re-enables interaction (the grid container above
+            is pointer-events-none so the robot can cursor-track on the left). */}
         <m.div
           {...revealCard}
-          className="relative flex items-center justify-center px-6 py-10 sm:px-10 min-h-[100dvh] min-[900px]:min-h-0 min-[900px]:border-l min-[900px]:border-hair min-[900px]:bg-base/45 min-[900px]:backdrop-blur-xl"
+          className="pointer-events-auto relative flex items-center justify-center px-6 py-10 sm:px-10 min-h-[100dvh] min-[900px]:min-h-0 min-[900px]:border-l min-[900px]:border-hair min-[900px]:bg-base/45 min-[900px]:backdrop-blur-xl"
         >
           {!REDUCED && <CursorSpotlight size={340} />}
           {children}
