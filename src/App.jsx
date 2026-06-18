@@ -17,7 +17,7 @@ import { LiquidButton, MetalButton } from "./components/ui/buttons";
 import { NavBar } from "./components/ui/tubelight-navbar";
 import { opHours, componentCapacity, round1, round2, costing, inr, TARGET_HR } from "./lib/capacity";
 import { scheduleMachine, monthBounds, fmtDate } from "./lib/schedule";
-import { suggestMachines, suggestSplit, isDown } from "./lib/loadability";
+import { suggestMachines, suggestSplit, isDown, allowedMachines, isAllowedOn } from "./lib/loadability";
 import { spring, ease, dur, tween, exitTween } from "./lib/motion";
 import { LOW_POWER } from "./lib/power";
 
@@ -1806,10 +1806,14 @@ function MachineLoading({ data, reload, month = curMonth() }) {
   const selPct = selCap ? Math.round((selDays / selCap) * 100) : 0;
   const compName = (id) => components.find((c) => c.id === id)?.name || "?";
   const compOps = (id) => (operations || []).filter((o) => o.component_id === id);
+  // Machine eligibility: only parts ALLOWED on the selected machine show in the
+  // add-line picker (empty allow-list = all parts) — "if it can't run here, hide it".
+  const eligibleComps = activeComps.filter((c) => isAllowedOn(c.id, sel.id, componentMachines));
+  const effCompId = eligibleComps.some((c) => c.id === compId) ? compId : (eligibleComps[0]?.id || "");
 
   const addLine = async () => {
-    if (busy || !compId || !qty) return; setBusy(true); setErr("");
-    try { await db.addMachinePlanLine({ month, machine_id: sel.id, component_id: compId, qty: cleanInt(qty) ?? 0, seq: lines.length }); setQty(""); await reload(); }
+    if (busy || !effCompId || !qty) return; setBusy(true); setErr("");
+    try { await db.addMachinePlanLine({ month, machine_id: sel.id, component_id: effCompId, qty: cleanInt(qty) ?? 0, seq: lines.length }); setQty(""); await reload(); }
     catch (e) { setErr(e.message || "Failed to add"); } finally { setBusy(false); }
   };
   const editQty = async (id, v) => { const q = cleanInt(v); if (q === null) return; try { setErr(""); await db.updateMachinePlanLine(id, { qty: q }); await reload(); } catch (e) { setErr(e?.message || "Quantity didn't save — please retry."); } };
@@ -1880,6 +1884,17 @@ function MachineLoading({ data, reload, month = curMonth() }) {
       await reload();
     } catch (e) { setErr(e?.message || "Split failed — please retry."); }
     finally { setDownBusy(false); }
+  };
+
+  // --- machine eligibility (which machines a part may run on) ---------------
+  const toggleEligibility = async (componentId, machineId) => {
+    const cur = new Set(allowedMachines(componentId, componentMachines, active).map((mm) => mm.id));
+    if (cur.has(machineId)) cur.delete(machineId); else cur.add(machineId);
+    let next = active.filter((mm) => cur.has(mm.id)).map((mm) => mm.id);
+    if (next.length === active.length) next = []; // all machines lit → store the all-allowed sentinel (0 rows)
+    setErr("");
+    try { await db.setAllowedMachines(componentId, next); await reload(); }
+    catch (e) { setErr(e?.message || "Couldn't update compatibility — please retry."); }
   };
 
   return (
@@ -1997,18 +2012,20 @@ function MachineLoading({ data, reload, month = curMonth() }) {
 
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
           <div className="sm:col-span-2"><label className={labelCls}>Part</label>
-            <select value={compId} onChange={(e) => { setCompId(e.target.value); setErr(""); }} className={inputCls}>
-              {activeComps.map((c) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` · ${c.code}` : ""}</option>)}
+            <select value={effCompId} onChange={(e) => { setCompId(e.target.value); setErr(""); }} disabled={eligibleComps.length === 0} className={inputCls}>
+              {eligibleComps.length === 0
+                ? <option value="">No parts can run on {sel.name} — set compatibility below</option>
+                : eligibleComps.map((c) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` · ${c.code}` : ""}</option>)}
             </select>
           </div>
           <div className="flex gap-2.5 items-end">
             <div className="flex-1"><label className={labelCls}>Qty</label><input type="number" min="0" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="140" className={inputCls} /></div>
-            <MetalButton onClick={addLine} disabled={!compId || !qty || busy} className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
+            <MetalButton onClick={addLine} disabled={!effCompId || !qty || busy} className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
           </div>
         </div>
         {/* live LOADABILITY check — can this machine take this part+qty? */}
-        {compId && qty && (() => {
-          const pOps = compOps(compId);
+        {effCompId && qty && (() => {
+          const pOps = compOps(effCompId);
           const need = componentCapacity(pOps, cleanInt(qty) ?? 0).days; // 3-shift-equiv days this part+qty needs
           const spare = selCap - selDays;  // free days on the selected machine
           const after = spare - need;      // free days left if we add it
@@ -2037,6 +2054,28 @@ function MachineLoading({ data, reload, month = curMonth() }) {
 
       {/* Phase 4: plan vs actual (the sheet's Actual section) */}
       <MachinePlanVsActual machine={sel} lines={lines} operations={operations} components={components} entries={data.entries} />
+
+      {/* machine eligibility — which machines each part may run on */}
+      <Panel title="Part ↔ Machine compatibility" tag="07" className="mt-4">
+        <p className="text-ink-soft text-sm mb-3 -mt-1">Tap a machine to toggle whether a part can run on it. A part with <b>all</b> machines lit runs anywhere (the default). Restrict a part and the rest disappear from its machine pickers and breakdown moves — <b>if it can't run there, it won't show.</b></p>
+        <div className="space-y-2.5">
+          {activeComps.map((c) => {
+            const allowed = new Set(allowedMachines(c.id, componentMachines, active).map((mm) => mm.id));
+            const restricted = (componentMachines || []).some((cm) => cm.component_id === c.id);
+            return (
+              <div key={c.id} className="rounded-lg border border-hair bg-inset/40 p-3">
+                <div className="flex items-baseline gap-2 mb-2"><span className="font-semibold text-sm text-ink">{c.name}</span>{c.code && <span className="font-mono text-[11px] text-ink-dim">{c.code}</span>}<span className="ml-auto font-mono text-[10px] uppercase tracking-wider text-ink-dim">{restricted ? `${allowed.size}/${active.length} machines` : "all machines"}</span></div>
+                <div className="flex flex-wrap gap-1.5">
+                  {active.map((m) => {
+                    const on = allowed.has(m.id);
+                    return <button key={m.id} onClick={() => toggleEligibility(c.id, m.id)} title={on ? `${c.name} can run on ${m.name} — tap to disallow` : `${c.name} cannot run on ${m.name} — tap to allow`} className={`text-[11px] font-semibold px-2 py-1 rounded-md border transition ${on ? "bg-brand-500/15 border-brand-500/40 text-ink" : "bg-inset border-hair text-ink-dim hover:text-ink-soft line-through decoration-bad-ink/50"}`}>{m.name}</button>;
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
 
       <ConfirmDialog open={!!delLine} title="Remove from machine plan?" body={delLine ? <>Remove <b className="text-ink">{compName(delLine.component_id)}</b> from {sel.name}'s plan?</> : null} confirmLabel="Remove" danger busy={delBusy} onConfirm={confirmDel} onClose={() => { if (!delBusy) setDelLine(null); }} />
     </>

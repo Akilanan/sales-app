@@ -232,6 +232,17 @@ export const db = {
     const { error } = await supabase.from("component_machines").delete().eq("component_id", componentId).eq("machine_id", machineId);
     if (error) throw error;
   },
+  // Replace a part's whole eligibility set in one go. An EMPTY list stores 0 rows
+  // = the "all-allowed" default (the part may run on any machine).
+  async setAllowedMachines(componentId, machineIds) {
+    const { error: dErr } = await supabase.from("component_machines").delete().eq("component_id", componentId);
+    if (dErr) throw dErr;
+    const ids = [...new Set((machineIds || []).filter(Boolean))];
+    if (ids.length) {
+      const { error } = await supabase.from("component_machines").upsert(ids.map((m) => ({ component_id: componentId, machine_id: m })), { onConflict: "component_id,machine_id" });
+      if (error) throw error;
+    }
+  },
 
   // ---- MACHINES ------------------------------------------------------------
   async listMachines() {
