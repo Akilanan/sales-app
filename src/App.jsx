@@ -17,6 +17,7 @@ import { LiquidButton, MetalButton } from "./components/ui/buttons";
 import { NavBar } from "./components/ui/tubelight-navbar";
 import { opHours, componentCapacity, round1, round2, costing, inr, TARGET_HR } from "./lib/capacity";
 import { scheduleMachine, monthBounds, fmtDate } from "./lib/schedule";
+import { suggestMachines, suggestSplit, isDown } from "./lib/loadability";
 import { spring, ease, dur, tween, exitTween } from "./lib/motion";
 import { LOW_POWER } from "./lib/power";
 
@@ -1781,7 +1782,7 @@ function loadTone(pct) {
 }
 
 function MachineLoading({ data, reload, month = curMonth() }) {
-  const { machines, components, operations, machinePlan } = data;
+  const { machines, components, operations, machinePlan, breakdowns, componentMachines } = data;
   const active = machines.filter((m) => m.active !== false);
   const activeComps = components.filter((c) => c.active !== false);
   const [selId, setSelId] = useState(active[0]?.id || "");
@@ -1790,12 +1791,15 @@ function MachineLoading({ data, reload, month = curMonth() }) {
   const [qty, setQty] = useState("");
   const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
   const [delLine, setDelLine] = useState(null); const [delBusy, setDelBusy] = useState(false);
+  const [downBusy, setDownBusy] = useState(false); // mark-down / bring-up in flight
 
   if (!active.length) return <><PageHead title="Machine Loading" sub="Assign parts to machines and see capacity" /><div className="mt-6"><Empty msg="No machines yet. Seed your machines first." /></div></>;
 
-  // Machine capacity in 3-shift-equivalent days: a 1-shift machine has 1/3 the
-  // daily output, so its capacity = working_days × shifts/3 (matches the sheets).
-  const wd = (m) => round1(((m && m.working_days) || MACHINE_DAYS) * (((m && m.shifts) || 3) / 3));
+  // Machines marked DOWN this month → capacity 0 (their load must move elsewhere).
+  const downSet = new Set((breakdowns || []).map((b) => b.machine_id));
+  // Machine capacity in 3-shift-equivalent days = working_days × shifts/3; a DOWN
+  // machine has 0 capacity this month.
+  const wd = (m) => (isDown(m && m.id, downSet) ? 0 : round1(((m && m.working_days) || MACHINE_DAYS) * (((m && m.shifts) || 3) / 3)));
   const lines = (machinePlan || []).filter((l) => l.machine_id === sel.id);
   const selDays = machineLoadDays(sel.id, machinePlan, operations);
   const selCap = wd(sel);
@@ -1830,6 +1834,54 @@ function MachineLoading({ data, reload, month = curMonth() }) {
     } catch (e) { setErr(e?.message || "Re-ordering failed — please retry."); }
   };
 
+  // --- machine breakdown + flexible re-routing ------------------------------
+  const selDown = isDown(sel.id, downSet);
+  const toggleDown = async () => {
+    setDownBusy(true); setErr("");
+    try {
+      if (selDown) await db.clearMachineDown(sel.id, month);
+      else await db.setMachineDown(sel.id, month);
+      await reload();
+    } catch (e) { setErr(e?.message || "Couldn't update machine status — please retry."); }
+    finally { setDownBusy(false); }
+  };
+  const seqOn = (plan, machineId) => (plan || []).filter((x) => x.machine_id === machineId).length; // append to a machine's run order
+  const reassignCtx = (plan) => ({ machines, machinePlan: plan, operations, componentMachines, downSet, excludeId: sel.id });
+  const reassign = async (line, targetId) => {
+    setErr(""); setDownBusy(true);
+    try { await db.updateMachinePlanLine(line.id, { machine_id: targetId, seq: seqOn(machinePlan, targetId) }); await reload(); }
+    catch (e) { setErr(e?.message || "Move failed — please retry."); }
+    finally { setDownBusy(false); }
+  };
+  const moveAll = async () => {
+    setErr(""); setDownBusy(true);
+    try {
+      let plan = machinePlan; // local copy so each move sees the prior one (sequential greedy)
+      for (const l of lines) {
+        const cands = suggestMachines({ componentId: l.component_id, ops: compOps(l.component_id), qty: l.qty, ...reassignCtx(plan) });
+        const best = cands.find((c) => c.fits) || cands[0];
+        if (!best) continue; // no eligible machine — leave it stranded (flagged in the UI)
+        await db.updateMachinePlanLine(l.id, { machine_id: best.machine.id, seq: seqOn(plan, best.machine.id) });
+        plan = plan.map((x) => (x.id === l.id ? { ...x, machine_id: best.machine.id } : x));
+      }
+      await reload();
+    } catch (e) { setErr(e?.message || "Move-all failed — please retry."); }
+    finally { setDownBusy(false); }
+  };
+  const splitLine = async (line) => {
+    setErr(""); setDownBusy(true);
+    try {
+      const { alloc, unplaced } = suggestSplit({ componentId: line.component_id, ops: compOps(line.component_id), qty: line.qty, ...reassignCtx(machinePlan) });
+      if (!alloc.length) { setErr("No eligible free machine can take any of this part."); return; }
+      const [first, ...rest] = alloc; // reuse the existing line for the first chunk, add new lines for the rest
+      await db.updateMachinePlanLine(line.id, { machine_id: first.machine.id, qty: first.qty, seq: seqOn(machinePlan, first.machine.id) });
+      for (const a of rest) await db.addMachinePlanLine({ month, machine_id: a.machine.id, component_id: line.component_id, qty: a.qty, seq: seqOn(machinePlan, a.machine.id) });
+      if (unplaced > 0) setErr(`Split placed what fit — ${unplaced} pcs couldn't fit on any free machine (over capacity).`);
+      await reload();
+    } catch (e) { setErr(e?.message || "Split failed — please retry."); }
+    finally { setDownBusy(false); }
+  };
+
   return (
     <>
       <PageHead title="Machine Loading" sub={`${prettyMonth(month)} · planned days vs each machine's working month`} />
@@ -1838,16 +1890,21 @@ function MachineLoading({ data, reload, month = curMonth() }) {
       <Panel title="All Machines — load this month" tag="01" className="mt-6 mb-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
           {active.map((m) => {
+            const down = isDown(m.id, downSet);
             const d = machineLoadDays(m.id, machinePlan, operations);
             const cap = wd(m);
-            const pct = Math.round((d / cap) * 100);
+            const pct = cap > 0 ? Math.round((d / cap) * 100) : 0;
             const tone = loadTone(pct);
             return (
-              <button key={m.id} onClick={() => setSelId(m.id)} className={`text-left rounded-lg border ${m.id === sel.id ? "border-brand-500 bg-brand-500/[0.06]" : tone.ring + " bg-inset/50 hover:border-brand-500/40"} p-3 transition`}>
-                <div className="font-semibold text-[13px] text-ink truncate">{m.name}</div>
-                <div className="mt-1.5 flex items-baseline gap-1"><span className={`font-mono font-bold tnum ${tone.text}`}>{round1(d)}</span><span className="font-mono text-[11px] text-ink-dim">/ {cap}d</span></div>
-                <div className="mt-1.5 h-1.5 rounded-full bg-over overflow-hidden"><div className={`h-full origin-left transition-transform duration-700 ease-out ${tone.bar}`} style={{ transform: `scaleX(${Math.min(pct, 100) / 100})` }} /></div>
-                {pct > 100 && <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-bad-ink">over by {round1(d - cap)}d</div>}
+              <button key={m.id} onClick={() => setSelId(m.id)} className={`text-left rounded-lg border ${m.id === sel.id ? "border-brand-500 bg-brand-500/[0.06]" : down ? "border-bad/40 bg-bad-soft/20" : tone.ring + " bg-inset/50 hover:border-brand-500/40"} p-3 transition`}>
+                <div className="flex items-center gap-1.5"><span className="font-semibold text-[13px] text-ink truncate">{m.name}</span>{down && <span className="font-mono text-[9px] uppercase tracking-wider text-bad-ink border border-bad/40 rounded px-1 py-0.5 shrink-0">down</span>}</div>
+                {down
+                  ? <div className="mt-1.5 font-mono text-[11px] text-bad-ink">{round1(d)}d stranded · tap to move</div>
+                  : <>
+                      <div className="mt-1.5 flex items-baseline gap-1"><span className={`font-mono font-bold tnum ${tone.text}`}>{round1(d)}</span><span className="font-mono text-[11px] text-ink-dim">/ {cap}d</span></div>
+                      <div className="mt-1.5 h-1.5 rounded-full bg-over overflow-hidden"><div className={`h-full origin-left transition-transform duration-700 ease-out ${tone.bar}`} style={{ transform: `scaleX(${Math.min(pct, 100) / 100})` }} /></div>
+                      {pct > 100 && <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-bad-ink">over by {round1(d - cap)}d</div>}
+                    </>}
               </button>
             );
           })}
@@ -1856,10 +1913,48 @@ function MachineLoading({ data, reload, month = curMonth() }) {
 
       {/* selected machine's plan */}
       <Panel title={`Plan — ${sel.name}`} tag="02" right={
-        <select value={selId} onChange={(e) => setSelId(e.target.value)} className="bg-inset border border-hair rounded-lg text-sm text-ink px-3 py-2 font-semibold outline-none focus:border-brand-500 max-w-[180px]">
-          {active.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <button onClick={toggleDown} disabled={downBusy} className={`text-xs font-semibold px-3 py-2 rounded-lg border transition disabled:opacity-50 ${selDown ? "border-hair text-ok-ink hover:border-brand-500/40" : "border-bad/30 text-bad-ink hover:border-bad/60"}`}>{downBusy ? "…" : selDown ? "Bring back up" : "Mark down"}</button>
+          <select value={selId} onChange={(e) => setSelId(e.target.value)} className="bg-inset border border-hair rounded-lg text-sm text-ink px-3 py-2 font-semibold outline-none focus:border-brand-500 max-w-[160px]">
+            {active.map((m) => <option key={m.id} value={m.id}>{m.name}{isDown(m.id, downSet) ? " (down)" : ""}</option>)}
+          </select>
+        </div>
       }>
+        {selDown && (
+          <div className="mb-4 rounded-xl border border-bad/30 bg-bad-soft/20 p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertTriangle size={16} className="text-bad-ink shrink-0" />
+              <span className="font-semibold text-ink">{sel.name} is DOWN this month</span>
+              {lines.length > 0 && <button onClick={moveAll} disabled={downBusy} className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink hover:border-brand-500/40 transition disabled:opacity-40">{downBusy ? "Moving…" : "Move all to best free machines"}</button>}
+            </div>
+            <p className="text-ink-soft text-sm mb-3">{lines.length === 0 ? "Nothing was planned here — nothing to move." : <>Its <b className="text-ink">{lines.length}</b> part{lines.length === 1 ? "" : "s"} ({round1(selDays)}d) need to move to free machines. Pick a target for each, or move all.</>}</p>
+            {lines.length > 0 && (
+              <div className="space-y-2">
+                {lines.map((l) => {
+                  const lops = compOps(l.component_id);
+                  const ld = componentCapacity(lops, l.qty).days;
+                  const cands = suggestMachines({ componentId: l.component_id, ops: lops, qty: l.qty, ...reassignCtx(machinePlan) });
+                  const fits = cands.filter((c) => c.fits).slice(0, 3);
+                  return (
+                    <div key={l.id} className="rounded-lg border border-hair bg-inset/60 p-3">
+                      <div className="flex items-baseline gap-2 mb-2"><span className="font-semibold text-sm text-ink">{compName(l.component_id)}</span><span className="font-mono text-xs text-ink-dim">{l.qty} pcs · {round1(ld)}d</span></div>
+                      {cands.length === 0
+                        ? <div className="text-xs text-warn-ink">No eligible machine can run this part — keep it here or widen its allowed machines.</div>
+                        : fits.length === 0
+                          ? <div className="flex flex-wrap items-center gap-2"><span className="text-xs text-bad-ink">No single free machine fits {round1(ld)}d.</span><button onClick={() => splitLine(l)} disabled={downBusy} className="text-xs font-semibold px-2.5 py-1 rounded bg-brand-500/15 border border-brand-500/40 text-ink hover:bg-brand-500/25 transition disabled:opacity-40">Split across machines</button></div>
+                          : <div className="flex flex-wrap gap-1.5">
+                              {fits.map((c) => (
+                                <button key={c.machine.id} onClick={() => reassign(l, c.machine.id)} disabled={downBusy} title={`${round1(c.spare)}d free · ${round1(c.after)}d left after`} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/50 transition disabled:opacity-40">→ {c.machine.name} <span className="text-ink-dim font-mono">({round1(c.spare)}d free)</span></button>
+                              ))}
+                              <button onClick={() => splitLine(l)} disabled={downBusy} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-inset border border-hair text-ink-dim hover:text-ink hover:border-brand-500/40 transition disabled:opacity-40">or split</button>
+                            </div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
           <span className="text-ink-soft text-sm">Total load:</span>
           <span className={`font-mono text-2xl font-bold tnum ${loadTone(selPct).text}`}>{round1(selDays)}<span className="text-ink-dim text-base"> / {selCap} days</span></span>
