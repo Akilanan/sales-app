@@ -335,6 +335,11 @@ const cleanNum = (v) => { const s = String(v ?? "").trim(); if (s === "") return
 // row (returns null so the caller skips the write, leaving the prior value).
 const cleanPosInt = (v) => { const n = cleanInt(v); return n && n > 0 ? n : null; };
 
+// Scrap + downtime reason chips — Akilan's approved defaults (admin can extend later).
+// Captured so the floor can finally answer WHY output was lost, not just how much.
+const SCRAP_REASONS = ["Tool wear", "Setup / first-off", "Material defect", "Dimension out", "Operator error", "Programme issue"];
+const DOWNTIME_REASONS = ["Tool change", "Breakdown", "No material", "No operator", "Setup", "Waiting inspection", "Power", "Planned maintenance"];
+
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
@@ -1069,7 +1074,7 @@ function Dashboard({ data, live, month = curMonth() }) {
 
 /* ------------------------------ Shift Entry ------------------------------- */
 function ShiftEntry({ data, user, reload, month = curMonth() }) {
-  const { components, machines, entries } = data;
+  const { components, machines, entries, plans } = data;
   const [date, setDate] = useState(todayStr());
   const [shift, setShift] = useState(1);
   const [componentId, setComponentId] = useState("");
@@ -1077,6 +1082,9 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
   const [qty, setQty] = useState(0);
   const [scrap, setScrap] = useState(0);
   const [notes, setNotes] = useState("");
+  const [scrapReason, setScrapReason] = useState("");
+  const [downtimeMin, setDowntimeMin] = useState(0);
+  const [downtimeReason, setDowntimeReason] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
@@ -1147,11 +1155,11 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
   const doSave = () => {
     if (saving) return; // guard against a double-tap firing addEntry twice
     if (!(Number(qty) > 0 || Number(scrap) > 0)) return; // belt-and-braces: never persist a fully-empty row
-    const entry = { production_date: date, shift, component_id: componentId, machine_id: machineId || null, operator_id: user.id, quantity: Number(qty), scrap_qty: Number(scrap), notes: notes.trim() };
+    const entry = { production_date: date, shift, component_id: componentId, machine_id: machineId || null, operator_id: user.id, quantity: Number(qty), scrap_qty: Number(scrap), notes: notes.trim(), scrap_reason: Number(scrap) > 0 ? (scrapReason || null) : null, downtime_minutes: cleanInt(downtimeMin) ?? 0, downtime_reason: Number(downtimeMin) > 0 ? (downtimeReason || null) : null };
     const tempId = `tmp-${Date.now()}`;
     setSaving(true);
     setPending((p) => [{ ...entry, id: tempId, created_at: Date.now() }, ...p]);
-    setError(""); setConfirm(false); setQty(0); setScrap(0); setNotes("");
+    setError(""); setConfirm(false); setQty(0); setScrap(0); setNotes(""); setScrapReason(""); setDowntimeMin(0); setDowntimeReason("");
     setToast(`Recorded ${compName(entry.component_id)} · Shift ${entry.shift}`);
     setTimeout(() => setToast(""), 2200);
     if (navigator.vibrate) { try { navigator.vibrate(10); } catch { /* blocked — fine */ } }
@@ -1164,7 +1172,7 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
         // rollback: pull the optimistic row, put the values back, surface the error
         setPending((p) => p.filter((x) => x.id !== tempId));
         setToast("");
-        setQty(entry.quantity); setScrap(entry.scrap_qty); setNotes(entry.notes);
+        setQty(entry.quantity); setScrap(entry.scrap_qty); setNotes(entry.notes); setScrapReason(entry.scrap_reason || ""); setDowntimeMin(entry.downtime_minutes || 0); setDowntimeReason(entry.downtime_reason || "");
         setError(e?.message || "Could not save this entry. Please try again.");
         setConfirm(true);
       } finally {
@@ -1227,6 +1235,20 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
             ))}
           </div>
 
+          {/* operator's own shift target for the selected part (quantity only — no money) */}
+          {componentId && (() => {
+            const sp = (plans || []).find((p) => p.component_id === componentId);
+            const st = sp && sp.working_days ? Math.round(sp.target_qty / sp.working_days / SHIFTS.length) : null;
+            if (st == null) return null;
+            const done = entries.filter((e) => e.component_id === componentId && e.production_date === date && e.shift === shift && e.operator_id === user.id).reduce((s, e) => s + e.quantity, 0);
+            return (
+              <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair bg-inset px-3.5 py-2.5 text-sm">
+                <Gauge size={15} className="shrink-0 text-brand-300" />
+                <span className="text-ink-soft">Shift target for <b className="text-ink">{compName(componentId)}</b>: <b className="text-ink font-mono">~{st}</b> pcs · logged this shift: <b className="text-ink font-mono">{done}</b></span>
+              </div>
+            );
+          })()}
+
           <label className={labelCls}>Machine</label>
           <div className="flex flex-wrap gap-2 mb-5">
             {machines.map((m) => (
@@ -1237,6 +1259,34 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div><label className={labelCls}>Quantity Produced</label><Stepper value={qty} set={setQty} /></div>
             <div><label className={labelCls}>Scrap (optional)</label><Stepper value={scrap} set={setScrap} /></div>
+          </div>
+
+          {/* WHY scrap happened — only when there IS scrap. Tap-chips (operators won't type). */}
+          {Number(scrap) > 0 && (
+            <div className="mb-4">
+              <label className={labelCls}>Scrap reason</label>
+              <div className="flex flex-wrap gap-2">
+                {SCRAP_REASONS.map((r) => (
+                  <button key={r} type="button" onClick={() => setScrapReason((cur) => (cur === r ? "" : r))} aria-pressed={scrapReason === r} className={`px-3 py-2 rounded-lg border text-[13px] font-semibold transition active:scale-95 ${scrapReason === r ? "border-brand-500 bg-brand-500/[0.08] text-ink" : "border-hair bg-inset text-ink-soft hover:text-ink hover:border-brand-500/40"}`}>{r}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* downtime — minutes + WHY the machine stopped (feeds availability / OEE) */}
+          <div className="mb-4">
+            <label className={labelCls}>Downtime (optional)</label>
+            <div className="flex items-center gap-2 mb-2">
+              <input type="number" min="0" value={downtimeMin} onChange={(e) => setDowntimeMin(e.target.value)} placeholder="0" className={`${inputCls} max-w-[130px]`} />
+              <span className="text-ink-dim text-sm">minutes down</span>
+            </div>
+            {Number(downtimeMin) > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {DOWNTIME_REASONS.map((r) => (
+                  <button key={r} type="button" onClick={() => setDowntimeReason((cur) => (cur === r ? "" : r))} aria-pressed={downtimeReason === r} className={`px-3 py-2 rounded-lg border text-[13px] font-semibold transition active:scale-95 ${downtimeReason === r ? "border-brand-500 bg-brand-500/[0.08] text-ink" : "border-hair bg-inset text-ink-soft hover:text-ink hover:border-brand-500/40"}`}>{r}</button>
+                ))}
+              </div>
+            )}
           </div>
 
           <label className={labelCls}>Notes (optional)</label>
@@ -1259,7 +1309,7 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
                 <div key={e.id} className={`flex items-center justify-between px-3.5 py-3 bg-inset border rounded-xl ${isPending ? "border-hair-strong" : "border-hair"}`}>
                   <div className="min-w-0">
                     <div className="font-semibold text-sm text-ink truncate">{compName(e.component_id)}</div>
-                    <div className="font-mono text-[11px] text-ink-dim tnum mt-0.5">{e.production_date} · Shift {e.shift} · {machName(e.machine_id)}{isManager ? ` · ${userName(e.operator_id)}` : ""}{e.scrap_qty ? ` · ${e.scrap_qty} scrap` : ""}{e.notes ? " · note" : ""}</div>
+                    <div className="font-mono text-[11px] text-ink-dim tnum mt-0.5">{e.production_date} · Shift {e.shift} · {machName(e.machine_id)}{isManager ? ` · ${userName(e.operator_id)}` : ""}{e.scrap_qty ? ` · ${e.scrap_qty} scrap` : ""}{e.downtime_minutes ? ` · ${e.downtime_minutes}m down` : ""}{e.notes ? " · note" : ""}</div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <div className="text-right tabular-nums mr-1">
@@ -1292,6 +1342,8 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
                 {[["Date", date], ["Shift", `Shift ${shift}`], ["Component", compName(componentId)], ["Machine", machName(machineId)], ["Quantity", `${qty} units`], ["Scrap", `${scrap} units`]].map(([k, v]) => (
                   <div key={k} className="flex justify-between text-sm"><span className="font-mono text-ink-dim text-[12px] uppercase tracking-wide">{k}</span><span className="font-semibold text-ink">{v}</span></div>
                 ))}
+                {Number(scrap) > 0 && scrapReason && <div className="flex justify-between text-sm"><span className="font-mono text-ink-dim text-[12px] uppercase tracking-wide">Scrap reason</span><span className="font-semibold text-ink">{scrapReason}</span></div>}
+                {Number(downtimeMin) > 0 && <div className="flex justify-between text-sm"><span className="font-mono text-ink-dim text-[12px] uppercase tracking-wide">Downtime</span><span className="font-semibold text-ink">{downtimeMin} min{downtimeReason ? ` · ${downtimeReason}` : ""}</span></div>}
                 {notes && <div className="text-sm pt-1"><span className="font-mono text-ink-dim text-[12px] uppercase tracking-wide">Notes</span><div className="text-ink mt-0.5">{notes}</div></div>}
               </div>
               {dup && <div className={`${warnCls} mb-4`}><AlertTriangle size={16} className="shrink-0" /><span>A matching entry already exists for this shift. Confirm only if this is additional output.</span></div>}
@@ -1962,6 +2014,12 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
   return (
     <>
       <PageHead title="Machine Loading" sub={`${prettyMonth(month)} · planned days vs each machine's working month`} />
+      {month < curMonth() && (
+        <div role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-hair bg-inset px-4 py-2.5 text-sm text-warn-ink">
+          <AlertTriangle size={15} className="shrink-0" />
+          <span><b>{prettyMonth(month)} is closed</b> — past months are read-only. Switch to {prettyMonth(curMonth())} to make changes.</span>
+        </div>
+      )}
 
       {/* overview: every machine's load at a glance */}
       <Panel title="All Machines — load this month" tag="01" className="mt-6 mb-4">
@@ -2544,6 +2602,12 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth, isAdmin = false
   return (
     <>
       <PageHead title="Plan Setup" sub={`${prettyMonth(month)} · daily & per-shift targets are auto-calculated`} icon={Settings2} />
+      {month < curMonth() && (
+        <div role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-hair bg-inset px-4 py-2.5 text-sm text-warn-ink">
+          <AlertTriangle size={15} className="shrink-0" />
+          <span><b>{prettyMonth(month)} is closed</b> — past months are read-only. Switch to {prettyMonth(curMonth())} to make changes.</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 mt-6">
         <Panel title="Planning Period" tag="01">
