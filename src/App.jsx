@@ -17,7 +17,7 @@ import { LiquidButton, MetalButton } from "./components/ui/buttons";
 import { NavBar } from "./components/ui/tubelight-navbar";
 import { opHours, componentCapacity, round1, round2, costing, inr, TARGET_HR } from "./lib/capacity";
 import { scheduleMachine, monthBounds, fmtDate } from "./lib/schedule";
-import { suggestMachines, suggestSplit, isDown, allowedMachines, isAllowedOn } from "./lib/loadability";
+import { suggestMachines, suggestSplit, isDown, allowedMachines, isAllowedOn, machineCapacityDays } from "./lib/loadability";
 import { spring, ease, dur, tween, exitTween } from "./lib/motion";
 import { LOW_POWER } from "./lib/power";
 
@@ -330,6 +330,10 @@ function ConfigError() {
 // persisting NaN, a negative, or a silent 0 over real planning data.
 const cleanInt = (v) => { const s = String(v ?? "").trim(); if (s === "") return null; const n = Math.trunc(Number(s)); return Number.isFinite(n) && n >= 0 ? n : null; };
 const cleanNum = (v) => { const s = String(v ?? "").trim(); if (s === "") return null; const n = Number(s); return Number.isFinite(n) && n >= 0 ? n : null; };
+// Like cleanInt but rejects ZERO too — for planning quantities (a monthly target,
+// a machine-plan-line qty) where 0 is meaningless and must never persist as a real
+// row (returns null so the caller skips the write, leaving the prior value).
+const cleanPosInt = (v) => { const n = cleanInt(v); return n && n > 0 ? n : null; };
 
 export default function App() {
   const [booting, setBooting] = useState(true);
@@ -642,7 +646,9 @@ function Sidebar({ user, view, setView, logout, status, live }) {
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["supervisor", "admin"] },
     { id: "entry", label: "Shift Entry", icon: ClipboardList, roles: ["operator", "supervisor", "admin"] },
     { id: "plan", label: "Plan Setup", icon: Settings2, roles: ["supervisor", "admin"] },
-  ].filter((t) => t.roles.includes(user.role));
+    { id: "loading", label: "Loading", icon: Gauge, roles: ["supervisor", "admin"] },
+    { id: "team", label: "Team", icon: Users, roles: ["admin"] },
+  ].filter((t) => t.roles.includes(user.role)); // kept in sync with the live navTabs (App) so a reversal can't drop tabs
   return (
     <aside className="fixed inset-y-0 left-0 z-40 flex flex-col w-[68px] lg:w-[240px] bg-coal border-r border-hair transition-[width] duration-200">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/45 to-transparent" aria-hidden="true" />
@@ -1105,13 +1111,20 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
   const dup = entries.find((e) => e.production_date === date && e.shift === shift && e.component_id === componentId && e.operator_id === user.id);
 
   const closeConfirm = () => { setConfirm(false); setError(""); };
-  const open = () => { if (componentId && qty >= 0) { setError(""); setConfirm(true); } };
+  // Require real output: a produced qty > 0, OR a scrap count > 0 (a pure-scrap
+  // shift is legitimate). Block the all-zero row that created the "5048A × 0" entry.
+  const open = () => {
+    if (!componentId) return;
+    if (Number(qty) > 0 || Number(scrap) > 0) { setError(""); setConfirm(true); }
+    else setError("Enter a produced quantity (or a scrap count) before saving.");
+  };
   // OPTIMISTIC SAVE — the operator's acknowledgment must land ≤100ms (NN/g direct-
   // manipulation threshold), so the row, toast and haptic fire IMMEDIATELY and the
   // server reconciles in the background. On rejection the optimistic row is pulled,
   // the form values are RESTORED, and the dialog reopens with the error.
   const doSave = () => {
     if (saving) return; // guard against a double-tap firing addEntry twice
+    if (!(Number(qty) > 0 || Number(scrap) > 0)) return; // belt-and-braces: never persist a fully-empty row
     const entry = { production_date: date, shift, component_id: componentId, machine_id: machineId || null, operator_id: user.id, quantity: Number(qty), scrap_qty: Number(scrap), notes: notes.trim() };
     const tempId = `tmp-${Date.now()}`;
     setSaving(true);
@@ -1812,8 +1825,11 @@ function MachineLoading({ data, reload, month = curMonth() }) {
   const effCompId = eligibleComps.some((c) => c.id === compId) ? compId : (eligibleComps[0]?.id || "");
 
   const addLine = async () => {
-    if (busy || !effCompId || !qty) return; setBusy(true); setErr("");
-    try { await db.addMachinePlanLine({ month, machine_id: sel.id, component_id: effCompId, qty: cleanInt(qty) ?? 0, seq: lines.length }); setQty(""); await reload(); }
+    if (busy || !effCompId || selDown) return; // never add fresh load onto a DOWN (0-capacity) machine
+    const q = cleanPosInt(qty); // reject 0 / blank / negative — never persist a zero-qty plan line
+    if (!q) { setErr("Enter a quantity greater than 0."); return; }
+    setBusy(true); setErr("");
+    try { await db.addMachinePlanLine({ month, machine_id: sel.id, component_id: effCompId, qty: q, seq: lines.length }); setQty(""); await reload(); }
     catch (e) { setErr(e.message || "Failed to add"); } finally { setBusy(false); }
   };
   const editQty = async (id, v) => { const q = cleanInt(v); if (q === null) return; try { setErr(""); await db.updateMachinePlanLine(id, { qty: q }); await reload(); } catch (e) { setErr(e?.message || "Quantity didn't save — please retry."); } };
@@ -1861,37 +1877,59 @@ function MachineLoading({ data, reload, month = curMonth() }) {
     setErr(""); setDownBusy(true);
     try {
       let plan = machinePlan; // local copy so each move sees the prior one (sequential greedy)
+      const stranded = [];
       for (const l of lines) {
         const cands = suggestMachines({ componentId: l.component_id, ops: compOps(l.component_id), qty: l.qty, ...reassignCtx(plan) });
-        const best = cands.find((c) => c.fits) || cands[0];
-        if (!best) continue; // no eligible machine — leave it stranded (flagged in the UI)
+        const best = cands.find((c) => c.fits); // only move where it actually FITS (under the rated ceiling)
+        if (!best) { stranded.push(compName(l.component_id)); continue; } // nothing fits — leave it here rather than silently overbook a machine
         await db.updateMachinePlanLine(l.id, { machine_id: best.machine.id, seq: seqOn(plan, best.machine.id) });
         plan = plan.map((x) => (x.id === l.id ? { ...x, machine_id: best.machine.id } : x));
       }
-      await reload();
+      if (stranded.length) setErr(`Moved what fit. No free machine has room for: ${stranded.join(", ")} — split ${stranded.length === 1 ? "it" : "them"} across machines, or free up capacity first.`);
     } catch (e) { setErr(e?.message || "Move-all failed — please retry."); }
-    finally { setDownBusy(false); }
+    finally { await reload().catch(() => {}); setDownBusy(false); }
   };
   const splitLine = async (line) => {
     setErr(""); setDownBusy(true);
     try {
       const { alloc, unplaced } = suggestSplit({ componentId: line.component_id, ops: compOps(line.component_id), qty: line.qty, ...reassignCtx(machinePlan) });
       if (!alloc.length) { setErr("No eligible free machine can take any of this part."); return; }
-      const [first, ...rest] = alloc; // reuse the existing line for the first chunk, add new lines for the rest
-      await db.updateMachinePlanLine(line.id, { machine_id: first.machine.id, qty: first.qty, seq: seqOn(machinePlan, first.machine.id) });
+      const [first, ...rest] = alloc; // keep the existing line for the first chunk; spill the rest into new lines.
+      // Add the spill lines FIRST (purely additive), and only AFTER they all land do
+      // we shrink/reassign the ORIGINAL line (the one destructive step). A failure
+      // mid-way then leaves the original line at full qty — total planned qty can
+      // never silently drop below the original (no lost-quantity-on-partial-failure).
       for (const a of rest) await db.addMachinePlanLine({ month, machine_id: a.machine.id, component_id: line.component_id, qty: a.qty, seq: seqOn(machinePlan, a.machine.id) });
+      await db.updateMachinePlanLine(line.id, { machine_id: first.machine.id, qty: first.qty, seq: seqOn(machinePlan, first.machine.id) });
       if (unplaced > 0) setErr(`Split placed what fit — ${unplaced} pcs couldn't fit on any free machine (over capacity).`);
-      await reload();
-    } catch (e) { setErr(e?.message || "Split failed — please retry."); }
-    finally { setDownBusy(false); }
+    } catch (e) { setErr(e?.message || "Split failed — some lines may not have moved; check the plan below and retry."); }
+    finally { await reload().catch(() => {}); setDownBusy(false); } // always refresh so the UI reflects the TRUE db state, even after a partial failure
+  };
+  // Move a placed line that's no longer allowed on this machine to its best eligible
+  // (and fitting) free machine — the one-click fix for an eligibility violation.
+  const moveToEligible = async (l) => {
+    const cands = suggestMachines({ componentId: l.component_id, ops: compOps(l.component_id), qty: l.qty, ...reassignCtx(machinePlan) });
+    const best = cands.find((c) => c.fits) || cands[0];
+    if (!best) { setErr(`${compName(l.component_id)} has no other eligible machine — widen its allowed machines first.`); return; }
+    await reassign(l, best.machine.id);
   };
 
   // --- machine eligibility (which machines a part may run on) ---------------
   const toggleEligibility = async (componentId, machineId) => {
     const cur = new Set(allowedMachines(componentId, componentMachines, active).map((mm) => mm.id));
-    if (cur.has(machineId)) cur.delete(machineId); else cur.add(machineId);
+    const turningOn = !cur.has(machineId);
+    if (turningOn) cur.add(machineId); else cur.delete(machineId);
     let next = active.filter((mm) => cur.has(mm.id)).map((mm) => mm.id);
-    if (next.length === active.length) next = []; // all machines lit → store the all-allowed sentinel (0 rows)
+    if (!next.length) {
+      // A part must be runnable somewhere. The empty set is the "all-allowed"
+      // sentinel, so turning OFF the last lit machine must NOT silently flip the
+      // part to "runs anywhere" (the exact opposite of intent) — block it instead.
+      setErr(`${compName(componentId)} must stay allowed on at least one machine. To let it run anywhere, light up all machines instead.`);
+      return;
+    }
+    // Collapse to the all-allowed sentinel (0 rows) ONLY when this toggle turned a
+    // machine ON and that completed the full set — never on a turn-OFF path.
+    if (turningOn && next.length === active.length) next = [];
     setErr("");
     try { await db.setAllowedMachines(componentId, next); await reload(); }
     catch (e) { setErr(e?.message || "Couldn't update compatibility — please retry."); }
@@ -1987,6 +2025,7 @@ function MachineLoading({ data, reload, month = curMonth() }) {
                 : lines.map((l, li) => {
                   const ops = compOps(l.component_id);
                   const d = componentCapacity(ops, l.qty).days;
+                  const violates = !isAllowedOn(l.component_id, sel.id, componentMachines); // placed here but no longer allowed on this machine
                   return (
                     <tr key={l.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025] transition">
                       <td className="py-2.5 px-2">
@@ -1997,6 +2036,7 @@ function MachineLoading({ data, reload, month = curMonth() }) {
                             <button onClick={() => moveLine(l, 1)} disabled={li === lines.length - 1} aria-label="Run later" className="p-0.5 text-ink-dim hover:text-ink disabled:opacity-25 transition"><CaretDown size={12} /></button>
                           </span>
                           <span className="font-semibold text-sm">{compName(l.component_id)}</span>
+                          {violates && <button onClick={() => moveToEligible(l)} disabled={downBusy} title={`${compName(l.component_id)} isn't allowed on ${sel.name} — tap to move it to an eligible machine`} className="ml-1 inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-bad-ink border border-bad/40 rounded px-1.5 py-0.5 hover:bg-bad-soft/30 transition disabled:opacity-40"><AlertTriangle size={10} />can't run here · move</button>}
                         </div>
                       </td>
                       <td className="py-2.5 px-2 text-right"><input type="number" min="0" defaultValue={l.qty} onBlur={(e) => editQty(l.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-24`} /></td>
@@ -2012,25 +2052,29 @@ function MachineLoading({ data, reload, month = curMonth() }) {
 
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
           <div className="sm:col-span-2"><label className={labelCls}>Part</label>
-            <select value={effCompId} onChange={(e) => { setCompId(e.target.value); setErr(""); }} disabled={eligibleComps.length === 0} className={inputCls}>
+            <select value={effCompId} onChange={(e) => { setCompId(e.target.value); setErr(""); }} disabled={eligibleComps.length === 0 || selDown} className={inputCls}>
               {eligibleComps.length === 0
                 ? <option value="">No parts can run on {sel.name} — set compatibility below</option>
                 : eligibleComps.map((c) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` · ${c.code}` : ""}</option>)}
             </select>
           </div>
           <div className="flex gap-2.5 items-end">
-            <div className="flex-1"><label className={labelCls}>Qty</label><input type="number" min="0" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="140" className={inputCls} /></div>
-            <MetalButton onClick={addLine} disabled={!effCompId || !qty || busy} className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
+            <div className="flex-1"><label className={labelCls}>Qty</label><input type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="140" disabled={selDown} className={inputCls} /></div>
+            <MetalButton onClick={addLine} disabled={!effCompId || !qty || busy || selDown} className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
           </div>
         </div>
-        {/* live LOADABILITY check — can this machine take this part+qty? */}
-        {effCompId && qty && (() => {
+        {/* live LOADABILITY check — can this machine take this part+qty? Hidden when
+            the machine is DOWN (capacity 0 — fresh load can't go there). */}
+        {selDown
+          ? <div role="status" className="mt-3 flex items-start gap-2 rounded-lg border border-bad/30 bg-bad-soft/20 px-3 py-2.5 text-sm text-bad-ink"><AlertTriangle size={15} className="shrink-0 mt-0.5" /><span>{sel.name} is down this month — you can't add new load here. Bring it back up, or add to an active machine.</span></div>
+          : effCompId && qty && (() => {
           const pOps = compOps(effCompId);
           const need = componentCapacity(pOps, cleanInt(qty) ?? 0).days; // 3-shift-equiv days this part+qty needs
-          const spare = selCap - selDays;  // free days on the selected machine
+          const capRaw = machineCapacityDays(sel); // UNROUNDED — matches suggestMachines/loadability so a sub-0.1d rounding can't flip the loadable/over verdict
+          const spare = capRaw - selDays;  // free days on the selected machine
           const after = spare - need;      // free days left if we add it
           const noOps = pOps.length === 0;
-          const ok = after >= -0.05;
+          const ok = after >= -1e-6;
           return (
             <div role="status" className={`mt-3 flex items-start gap-2 rounded-lg border border-hair bg-inset px-3 py-2.5 text-sm ${noOps ? "text-warn-ink" : ok ? "text-ok-ink" : "text-bad-ink"}`}>
               {noOps ? <><AlertTriangle size={15} className="shrink-0 mt-0.5" /><span>No operations defined for this part — add them in <b>Plan Setup → Routing</b> so the app can size its load.</span></>
@@ -2429,7 +2473,7 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth }) {
 
   const planFor = (cid) => plans.find((p) => p.component_id === cid);
   const guard = async (fn) => { try { setPErr(""); await fn(); await reload(); } catch (e) { setPErr(e?.message || "That change didn't save — please retry."); } };
-  const changeTarget = (cid, v) => { const t = cleanInt(v); if (t === null) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: t, working_days: planFor(cid)?.working_days ?? 24 })); };
+  const changeTarget = (cid, v) => { const t = cleanPosInt(v); if (t === null) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: t, working_days: planFor(cid)?.working_days ?? 24 })); };
   const changeWD = (cid, v) => { const wd = cleanInt(v); if (!wd) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: planFor(cid)?.target_qty ?? 0, working_days: wd })); };
   const editComp = (id, fields) => guard(() => db.updateComponent(id, fields));
   const editRate = (id, v) => { const r = cleanNum(v); if (r === null) return; guard(() => db.setComponentRate(id, r)); };

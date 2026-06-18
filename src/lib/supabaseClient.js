@@ -232,14 +232,25 @@ export const db = {
     const { error } = await supabase.from("component_machines").delete().eq("component_id", componentId).eq("machine_id", machineId);
     if (error) throw error;
   },
-  // Replace a part's whole eligibility set in one go. An EMPTY list stores 0 rows
-  // = the "all-allowed" default (the part may run on any machine).
+  // Set a part's whole eligibility set, applied as a DIFF (add the missing rows,
+  // then remove the extra ones) — never delete-all-then-insert. A delete-all first
+  // would momentarily leave 0 rows, which the model reads as the "all-allowed"
+  // default; if the re-insert then failed, the restriction would silently vanish.
+  // Adding before removing means a partial failure errs toward MORE-allowed (a
+  // transient superset a retry fixes), never toward a lost safety constraint.
   async setAllowedMachines(componentId, machineIds) {
-    const { error: dErr } = await supabase.from("component_machines").delete().eq("component_id", componentId);
-    if (dErr) throw dErr;
-    const ids = [...new Set((machineIds || []).filter(Boolean))];
-    if (ids.length) {
-      const { error } = await supabase.from("component_machines").upsert(ids.map((m) => ({ component_id: componentId, machine_id: m })), { onConflict: "component_id,machine_id" });
+    const want = new Set([...new Set((machineIds || []).filter(Boolean))]);
+    const { data: curRows, error: rErr } = await supabase.from("component_machines").select("machine_id").eq("component_id", componentId);
+    if (rErr) throw rErr;
+    const have = new Set((curRows || []).map((r) => r.machine_id));
+    const toAdd = [...want].filter((m) => !have.has(m));
+    const toRemove = [...have].filter((m) => !want.has(m));
+    if (toAdd.length) {
+      const { error } = await supabase.from("component_machines").upsert(toAdd.map((m) => ({ component_id: componentId, machine_id: m })), { onConflict: "component_id,machine_id" });
+      if (error) throw error;
+    }
+    if (toRemove.length) {
+      const { error } = await supabase.from("component_machines").delete().eq("component_id", componentId).in("machine_id", toRemove);
       if (error) throw error;
     }
   },
