@@ -38,7 +38,11 @@ function monthRange(m /* 'YYYY-MM' */) {
   return { start: `${m}-01`, next };
 }
 async function profileOf(authId) {
-  const { data } = await supabase.from("users").select("*").eq("id", authId).single();
+  // Explicit columns — NEVER select login_code (the cleartext operator PIN). The
+  // app only needs id/name/role/active; PIN reveal is an admin-only Team action via
+  // the admin-users edge function. This also lets RLS/grants hide login_code from
+  // direct table reads without breaking login (0021_hide_login_code).
+  const { data } = await supabase.from("users").select("id, name, role, active, created_at").eq("id", authId).single();
   return data || null;
 }
 
