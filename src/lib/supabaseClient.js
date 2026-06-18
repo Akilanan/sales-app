@@ -122,9 +122,16 @@ export const db = {
     const { error } = await supabase.from("components").update({ active: false }).eq("id", id);
     if (error) throw error;
   },
+  // The ₹ per-piece rate lives in a managers-read / admin-write table (0018), NOT
+  // on components — so operators can read part names without ever seeing money.
   async setComponentRate(id, rate) {
-    const { error } = await supabase.from("components").update({ rate: Number(rate) || 0 }).eq("id", id);
+    const { error } = await supabase.from("component_rates").upsert({ component_id: id, rate: Number(rate) || 0, updated_at: new Date().toISOString() }, { onConflict: "component_id" });
     if (error) throw error;
+  },
+  async listComponentRates() {
+    const { data, error } = await supabase.from("component_rates").select("component_id, rate");
+    if (error) return []; // operators have no access — degrade quietly
+    return data || [];
   },
   // Edit name/code/industry after creation, or restore (active: true) a removed part.
   async updateComponent(id, fields) {

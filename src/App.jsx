@@ -360,20 +360,42 @@ export default function App() {
     setBooting(false);
   })(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (u = user) => {
     const m = month; // capture — the month this fetch belongs to
     const seq = ++loadSeq.current; // claim this fetch; a newer one bumps the id
-    const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
-    const [plans, entries, operations, machinePlan, settings, users, breakdowns, componentMachines] = await Promise.all([db.getPlans(m), db.listEntries({ month: m }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(m) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({}), db.listUsersLite ? db.listUsersLite() : Promise.resolve([]), db.listBreakdowns ? db.listBreakdowns(m) : Promise.resolve([]), db.listAllowedMachines ? db.listAllowedMachines() : Promise.resolve([])]);
-    if (seq !== loadSeq.current) return; // a newer month switch / refetch superseded us → drop this stale (possibly out-of-order) result
-    setData({ components, machines, plans, entries, operations, machinePlan, settings, users, breakdowns, componentMachines });
+    const isManager = u?.role === "supervisor" || u?.role === "admin";
+    // Operators get ONLY what Shift Entry needs — parts, machines, their own
+    // entries, the month's quantity targets. Everything financial / planning-detail
+    // (rates, loading plan, routing, costing settings, breakdowns, eligibility, the
+    // user list) is managers-only; RLS now enforces this server-side, and gating the
+    // fetch by role just avoids dead requests for data operators can't read.
+    const [components, machines, plans, entries] = await Promise.all([db.listComponents(), db.listMachines(), db.getPlans(m), db.listEntries({ month: m })]);
+    let operations = [], machinePlan = [], settings = {}, users = [], breakdowns = [], componentMachines = [], rates = [];
+    if (isManager) {
+      [operations, machinePlan, settings, users, breakdowns, componentMachines, rates] = await Promise.all([
+        db.listOperations ? db.listOperations() : Promise.resolve([]),
+        db.listMachinePlanLines ? db.listMachinePlanLines(m) : Promise.resolve([]),
+        db.getSettings ? db.getSettings() : Promise.resolve({}),
+        db.listUsersLite ? db.listUsersLite() : Promise.resolve([]),
+        db.listBreakdowns ? db.listBreakdowns(m) : Promise.resolve([]),
+        db.listAllowedMachines ? db.listAllowedMachines() : Promise.resolve([]),
+        db.listComponentRates ? db.listComponentRates() : Promise.resolve([]),
+      ]);
+    }
+    if (seq !== loadSeq.current) return; // a newer month switch / refetch superseded us → drop this stale result
+    // Merge the managers-only ₹ rate back onto each component so all existing c.rate
+    // UI keeps working; operators never receive it. (localDb keeps rate on the
+    // component, so fall back to c.rate when component_rates isn't present.)
+    const rateById = Object.fromEntries((rates || []).map((r) => [r.component_id, r.rate]));
+    const comps = components.map((c) => ({ ...c, rate: rateById[c.id] ?? c.rate ?? 0 }));
+    setData({ components: comps, machines, plans, entries, operations, machinePlan, settings, users, breakdowns, componentMachines });
     setDataMonth(m); // mark which month the loaded data is for (drives the switch-skeleton)
-  }, [month]);
+  }, [month, user]);
 
   // Month switch → refetch (skip while logged out / before the first fetch).
   useEffect(() => { if (user && dataReady) loadData(); }, [loadData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); setMonth(curMonth()); await loadData(); setDataReady(true); };
+  const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); setMonth(curMonth()); await loadData(u); setDataReady(true); }; // pass u — state `user` isn't updated yet this tick
   const logout = async () => { try { await db.signOut(); } catch { /* ignore */ } setUser(null); setView("dashboard"); setDataReady(false); };
 
   // LIVE SYNC — once signed in, refresh (debounced) whenever anyone logs output
@@ -489,8 +511,8 @@ export default function App() {
                         <>
                           {view === "dashboard" && <Dashboard data={data} live={live} setView={go} month={month} />}
                           {view === "entry" && <ShiftEntry data={data} user={user} reload={loadData} month={month} />}
-                          {view === "plan" && <PlanSetup data={data} reload={loadData} month={month} setMonth={setMonth} />}
-                          {view === "loading" && <MachineLoading data={data} reload={loadData} month={month} />}
+                          {view === "plan" && <PlanSetup data={data} reload={loadData} month={month} setMonth={setMonth} isAdmin={user.role === "admin"} />}
+                          {view === "loading" && <MachineLoading data={data} reload={loadData} month={month} isAdmin={user.role === "admin"} />}
                           {view === "team" && <TeamAdmin user={user} />}
                         </>
                       )}
@@ -1527,7 +1549,7 @@ function TeamAdmin({ user }) {
 /* ----------------------------- Costing (Phase 5) -------------------------- */
 // The sheet's costing block: per part — Amount (rate×qty), Hour-Rate vs the
 // ₹2200 target, Targeted amount, Loss. Rolls up to the machine's overall HR.
-function MachineCosting({ machine, lines, operations, components, reload, targetHr = TARGET_HR, machineRate = 1200 }) {
+function MachineCosting({ machine, lines, operations, components, reload, targetHr = TARGET_HR, machineRate = 1200, isAdmin = false }) {
   const opsByComp = {};
   for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
   const compOf = (id) => (components || []).find((c) => c.id === id) || {};
@@ -1575,7 +1597,9 @@ function MachineCosting({ machine, lines, operations, components, reload, target
               <tr key={r.l.id} className="border-b border-hair last:border-0 hover:bg-white/[0.025]">
                 <td className="py-2.5 px-2 font-semibold text-sm">{r.c.name}</td>
                 <td className="py-2.5 px-2 text-right font-mono tnum">{r.l.qty}</td>
-                <td className="py-2.5 px-2 text-right"><input type="number" min="0" defaultValue={r.c.rate || 0} onBlur={(e) => setRate(r.c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-24`} /></td>
+                <td className="py-2.5 px-2 text-right">{isAdmin
+                  ? <input type="number" min="0" defaultValue={r.c.rate || 0} onBlur={(e) => setRate(r.c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-24`} />
+                  : <span className="font-mono text-sm text-ink-soft tnum" title="Only an admin can change pricing">{r.c.rate ? inr(r.c.rate) : "—"}</span>}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-ink tnum">{inr(r.amount)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-ink-soft tnum">{round1(r.hours)}</td>
                 <td className={`py-2.5 px-2 text-right font-mono font-bold tnum ${hrTone(r.hr)}`}>{inr(r.hr)}</td>
@@ -1794,7 +1818,7 @@ function loadTone(pct) {
     : { text: "text-ok-ink", bar: "bg-ok", ring: "border-hair" };
 }
 
-function MachineLoading({ data, reload, month = curMonth() }) {
+function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
   const { machines, components, operations, machinePlan, breakdowns, componentMachines } = data;
   const active = machines.filter((m) => m.active !== false);
   const activeComps = components.filter((c) => c.active !== false);
@@ -2094,7 +2118,7 @@ function MachineLoading({ data, reload, month = curMonth() }) {
       <MachineSheet machine={sel} lines={lines} operations={operations} components={components} month={month} />
 
       {/* Phase 5: costing (hour-rate vs target) */}
-      <MachineCosting machine={sel} lines={lines} operations={operations} components={components} reload={reload} targetHr={Number(data.settings?.target_hr) || TARGET_HR} machineRate={Number(data.settings?.machine_rate) || 1200} />
+      <MachineCosting machine={sel} lines={lines} operations={operations} components={components} reload={reload} targetHr={Number(data.settings?.target_hr) || TARGET_HR} machineRate={Number(data.settings?.machine_rate) || 1200} isAdmin={isAdmin} />
 
       {/* Phase 4: plan vs actual (the sheet's Actual section) */}
       <MachinePlanVsActual machine={sel} lines={lines} operations={operations} components={components} entries={data.entries} />
@@ -2241,7 +2265,7 @@ function ExcelImport({ data, reload }) {
 
 // Editable settings: target hour-rate + per-machine working days / shifts /
 // rename / retire / add. The machine fleet itself is managed here.
-function SettingsPanel({ data, reload }) {
+function SettingsPanel({ data, reload, isAdmin = false }) {
   const machines = (data.machines || []).filter((m) => m.active !== false);
   const [hr, setHr] = useState(String(data.settings?.target_hr || "2200"));
   const [mr, setMr] = useState(String(data.settings?.machine_rate || "1200"));
@@ -2281,16 +2305,16 @@ function SettingsPanel({ data, reload }) {
         <div>
           <label className={labelCls}>Target hour-rate (₹/hr)</label>
           <div className="flex gap-2">
-            <input type="number" min="0" value={hr} onChange={(e) => setHr(e.target.value)} className={inputCls} />
-            <MetalButton onClick={saveHr} className="shrink-0">{saved ? <><Check size={16} /> Saved</> : "Save"}</MetalButton>
+            <input type="number" min="0" value={hr} onChange={(e) => setHr(e.target.value)} disabled={!isAdmin} title={!isAdmin ? "Only an admin can change costing" : undefined} className={inputCls} />
+            <MetalButton onClick={saveHr} disabled={!isAdmin} className="shrink-0 disabled:opacity-50 disabled:pointer-events-none">{saved ? <><Check size={16} /> Saved</> : "Save"}</MetalButton>
           </div>
           <p className="text-ink-dim text-xs mt-1.5">Your hour-rate goal — the Costing screen colours each part green at or above it.</p>
         </div>
         <div>
           <label className={labelCls}>Machine hour-rate (₹/hr)</label>
           <div className="flex gap-2">
-            <input type="number" min="0" value={mr} onChange={(e) => setMr(e.target.value)} className={inputCls} />
-            <MetalButton onClick={saveMr} className="shrink-0">{savedMr ? <><Check size={16} /> Saved</> : "Save"}</MetalButton>
+            <input type="number" min="0" value={mr} onChange={(e) => setMr(e.target.value)} disabled={!isAdmin} title={!isAdmin ? "Only an admin can change costing" : undefined} className={inputCls} />
+            <MetalButton onClick={saveMr} disabled={!isAdmin} className="shrink-0 disabled:opacity-50 disabled:pointer-events-none">{savedMr ? <><Check size={16} /> Saved</> : "Save"}</MetalButton>
           </div>
           <p className="text-ink-dim text-xs mt-1.5">What one machine-hour costs you — from the Excel header (1200).</p>
         </div>
@@ -2460,7 +2484,7 @@ function OperationsPanel({ data, reload }) {
   );
 }
 
-function PlanSetup({ data, reload, month = curMonth(), setMonth }) {
+function PlanSetup({ data, reload, month = curMonth(), setMonth, isAdmin = false }) {
   const { components, plans } = data;
   const [name, setName] = useState(""); const [code, setCode] = useState(""); const [industry, setIndustry] = useState("railway");
   const [adding, setAdding] = useState(false);
@@ -2579,7 +2603,9 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth }) {
                     </td>
                     <td className="py-3 px-2.5 text-right"><input type="number" min="0" defaultValue={target} onBlur={(e) => changeTarget(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={cellCls} /></td>
                     <td className="py-3 px-2.5 text-right"><input type="number" min="1" defaultValue={wd} onBlur={(e) => changeWD(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={cellCls} /></td>
-                    <td className="py-3 px-2.5 text-right"><input type="number" min="0" defaultValue={c.rate || 0} onBlur={(e) => { if ((parseFloat(e.target.value) || 0) !== (c.rate || 0)) editRate(c.id, e.target.value); }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} aria-label={`Rate of ${c.name}`} className={cellCls} /></td>
+                    <td className="py-3 px-2.5 text-right">{isAdmin
+                      ? <input type="number" min="0" defaultValue={c.rate || 0} onBlur={(e) => { if ((parseFloat(e.target.value) || 0) !== (c.rate || 0)) editRate(c.id, e.target.value); }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} aria-label={`Rate of ${c.name}`} className={cellCls} />
+                      : <span className="font-mono text-sm text-ink-soft tnum" title="Only an admin can change pricing">{c.rate ? inr(c.rate) : "—"}</span>}</td>
                     <td className="py-3 px-2.5 text-right font-bold text-brand-300 font-mono tnum">{daily.toFixed(1)}</td>
                     <td className="py-3 px-2.5 text-right text-ink-soft font-mono tnum">{(daily / 3).toFixed(1)}</td>
                     <td className="py-3 px-2.5"><button onClick={() => setDelComp(c)} aria-label={`Remove ${c.name}`} className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={15} /></button></td>
@@ -2609,7 +2635,7 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth }) {
       </Panel>
 
       <div className="mt-4"><OperationsPanel data={data} reload={reload} /></div>
-      <SettingsPanel data={data} reload={reload} />
+      <SettingsPanel data={data} reload={reload} isAdmin={isAdmin} />
       <ExcelImport data={data} reload={reload} />
 
       <ConfirmDialog
