@@ -170,6 +170,15 @@ Deno.serve(async (req: Request) => {
       }
       const { error } = await admin.from("users").update({ active }).eq("id", id);
       if (error) throw error;
+      // Deactivation must also REVOKE the user's live sessions — `active` is only
+      // checked at login, so without this their existing auto-refreshing JWT keeps
+      // full RLS access until they happen to sign out. revoke_user_sessions()
+      // drops their auth.sessions (cascades to refresh tokens); the client's
+      // onAuthStateChange then fires SIGNED_OUT on the next refresh.
+      if (!active) {
+        const { error: rErr } = await admin.rpc("revoke_user_sessions", { p_uid: id });
+        if (rErr) console.error("setActive: revoke_user_sessions failed:", String(rErr.message || rErr));
+      }
       return json({ ok: true }, 200);
     }
 

@@ -323,6 +323,13 @@ function ConfigError() {
   );
 }
 
+// Numeric-input guards. `min` in HTML is only a hint — a user can type a negative
+// or clear a cell and blur. These return null for blank / non-finite / negative
+// input so the caller SKIPS the write (leaving the prior value) instead of
+// persisting NaN, a negative, or a silent 0 over real planning data.
+const cleanInt = (v) => { const s = String(v ?? "").trim(); if (s === "") return null; const n = Math.trunc(Number(s)); return Number.isFinite(n) && n >= 0 ? n : null; };
+const cleanNum = (v) => { const s = String(v ?? "").trim(); if (s === "") return null; const n = Number(s); return Number.isFinite(n) && n >= 0 ? n : null; };
+
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
@@ -333,13 +340,27 @@ export default function App() {
   const [month, setMonth] = useState(curMonth()); // the VIEWED month — switchable for history review / pre-planning
   const [dataMonth, setDataMonth] = useState(curMonth()); // month the loaded `data` is for — when ≠ month, a switch is in flight
   const [live, setLive] = useState(false); // realtime connection state (supabase mode)
+  const loadSeq = useRef(0); // monotonic fetch id — only the latest loadData() may commit (kills the month-switch race)
 
-  useEffect(() => { (async () => { if (CONFIG_ERROR) { setBooting(false); return; } await seedIfEmpty(); setBooting(false); })(); }, []);
+  // Boot: seed (demo only) then RESTORE an existing Supabase session so a page
+  // reload returns straight to the app instead of bouncing to the login screen
+  // while a valid auto-refreshing token sits in localStorage.
+  useEffect(() => { (async () => {
+    if (CONFIG_ERROR) { setBooting(false); return; }
+    await seedIfEmpty();
+    try {
+      const u = db.restoreSession ? await db.restoreSession() : null;
+      if (u) await onLogin(u);
+    } catch { /* not signed in — fall through to the login screen */ }
+    setBooting(false);
+  })(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = useCallback(async () => {
     const m = month; // capture — the month this fetch belongs to
+    const seq = ++loadSeq.current; // claim this fetch; a newer one bumps the id
     const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
     const [plans, entries, operations, machinePlan, settings, users] = await Promise.all([db.getPlans(m), db.listEntries({ month: m }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(m) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({}), db.listUsersLite ? db.listUsersLite() : Promise.resolve([])]);
+    if (seq !== loadSeq.current) return; // a newer month switch / refetch superseded us → drop this stale (possibly out-of-order) result
     setData({ components, machines, plans, entries, operations, machinePlan, settings, users });
     setDataMonth(m); // mark which month the loaded data is for (drives the switch-skeleton)
   }, [month]);
@@ -362,6 +383,17 @@ export default function App() {
     );
     return () => { clearTimeout(t); setLive(false); unsub(); };
   }, [user, loadData]);
+
+  // Keep the UI in lock-step with the REAL auth session. If the token is revoked
+  // server-side (an admin deactivates this user) or simply expires, GoTrue fires
+  // SIGNED_OUT → drop the user so the app returns to login instead of running on
+  // a dead session. (Pairs with the deactivate→session-revoke server fix.)
+  useEffect(() => {
+    if (!db.onAuthStateChange) return;
+    return db.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") { setUser(null); setView("dashboard"); setDataReady(false); }
+    });
+  }, []);
 
   // PROD SAFETY: never silently serve demo data in a production build that has no
   // Supabase config. Refuse to mount; show a hard, unmistakable configuration error.
@@ -419,11 +451,11 @@ export default function App() {
                   screen (dashboard, loading, plans, entries) follows this month. */}
               {user.role !== "operator" && (
                 <div className={`flex items-center gap-0.5 rounded-lg border px-1 ${month !== curMonth() ? "border-hair-strong bg-white/[0.06]" : "border-hair bg-white/[0.03]"}`}>
-                  <button onClick={() => setMonth(addMonths(month, -1))} aria-label="Previous month" className="min-h-[40px] min-w-[34px] grid place-items-center rounded text-ink-dim hover:text-ink transition">‹</button>
+                  <button onClick={() => setMonth((m) => addMonths(m, -1))} aria-label="Previous month" className="min-h-[40px] min-w-[34px] grid place-items-center rounded text-ink-dim hover:text-ink transition">‹</button>
                   <button onClick={() => setMonth(curMonth())} title={month !== curMonth() ? "Viewing another month — click to return to the current month" : "Current month"} className="font-mono text-[11px] font-semibold tracking-wide text-ink-soft hover:text-ink transition px-1 whitespace-nowrap">
                     {prettyMonth(month)}{month !== curMonth() && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-warn align-middle" aria-label="Not the current month" />}
                   </button>
-                  <button onClick={() => setMonth(addMonths(month, 1))} aria-label="Next month" className="min-h-[40px] min-w-[34px] grid place-items-center rounded text-ink-dim hover:text-ink transition">›</button>
+                  <button onClick={() => setMonth((m) => addMonths(m, 1))} aria-label="Next month" className="min-h-[40px] min-w-[34px] grid place-items-center rounded text-ink-dim hover:text-ink transition">›</button>
                 </div>
               )}
             </div>
@@ -1486,7 +1518,7 @@ function MachineCosting({ machine, lines, operations, components, reload, target
   for (const o of operations || []) (opsByComp[o.component_id] ||= []).push(o);
   const compOf = (id) => (components || []).find((c) => c.id === id) || {};
   const [rErr, setRErr] = useState("");
-  const setRate = async (id, v) => { try { setRErr(""); await db.setComponentRate(id, parseFloat(v) || 0); await reload(); } catch (e) { setRErr(e?.message || "Rate didn't save — please retry."); } };
+  const setRate = async (id, v) => { const r = cleanNum(v); if (r === null) return; try { setRErr(""); await db.setComponentRate(id, r); await reload(); } catch (e) { setRErr(e?.message || "Rate didn't save — please retry."); } };
 
   if (!lines.length) return null;
   let totAmount = 0, totHours = 0, totLoss = 0;
@@ -1513,7 +1545,7 @@ function MachineCosting({ machine, lines, operations, components, reload, target
           <span className={`font-mono text-2xl font-bold tnum ${hrTone(machineHr)}`}>{inr(machineHr)}<span className="text-ink-dim text-sm">/hr</span></span>
           <span className="font-mono text-sm text-ink-soft">vs {inr(targetHr)} target</span>
           {totLoss > 0 && <span className="font-mono text-sm text-bad-ink">loss {inr(totLoss)}</span>}
-          <span className="font-mono text-sm text-ink-dim" title={`machine cost = ${inr(machineRate)}/hr × ${round1(totHours)} hrs (Settings → Machine hour-rate)`}>machine cost {inr(machineCost)} · margin {inr(totAmount - machineCost)}</span>
+          <span className="font-mono text-sm text-ink-dim" title={`machine cost = ${inr(machineRate)}/hr × ${round1(totHours)} hrs (Settings → Machine hour-rate)`}>machine cost {inr(machineCost)} · margin <span className={totAmount - machineCost < 0 ? "text-bad-ink font-semibold" : ""}>{inr(totAmount - machineCost)}{totAmount - machineCost < 0 ? " · LOSS" : ""}</span></span>
         </div>
       )}
       {rErr && <div role="alert" className={`${errCls} mb-4`}><AlertTriangle size={15} className="shrink-0" />{rErr}</div>}
@@ -1701,6 +1733,7 @@ function MachineSchedule({ machine, lines, operations, components, month = curMo
         {rows.map((r, i) => {
           const left = Math.max(0, ((r.start.getTime() - first.getTime()) / totalMs) * 100);
           const width = Math.max(1.5, ((r.end.getTime() - r.start.getTime()) / totalMs) * 100);
+          const overflows = r.end.getTime() > last.getTime(); // operation legitimately runs past this month — the bar is clamped to the box, so flag it
           // today marker — without it a mid-month Gantt reads as "all done"
           const todayMs = Date.now() - first.getTime();
           const todayPct = todayMs > 0 && todayMs < totalMs ? (todayMs / totalMs) * 100 : null;
@@ -1708,7 +1741,8 @@ function MachineSchedule({ machine, lines, operations, components, month = curMo
             <div key={i} className="flex items-center gap-3">
               <div className="w-40 shrink-0 truncate text-[12px]"><span className="font-semibold text-ink">{nameOf(r.component_id)}</span> <span className="font-mono text-ink-dim">op{r.op_no}</span></div>
               <div className="relative flex-1 h-6 rounded bg-inset/60 overflow-hidden">
-                <div className="absolute top-0 h-full rounded bg-gradient-to-r from-brand-500/70 to-brand-400/60 border border-brand-400/40 transition-[left,width] duration-500 ease-out" style={{ left: `${Math.min(left, 98)}%`, width: `${Math.min(width, 100 - Math.min(left, 98))}%` }} title={`${fmtDate(r.start)} → ${fmtDate(r.end)} · ${round1(r.days)}d`} />
+                <div className="absolute top-0 h-full rounded bg-gradient-to-r from-brand-500/70 to-brand-400/60 border border-brand-400/40 transition-[left,width] duration-500 ease-out" style={{ left: `${Math.min(left, 98)}%`, width: `${Math.min(width, 100 - Math.min(left, 98))}%` }} title={`${fmtDate(r.start)} → ${fmtDate(r.end)} · ${round1(r.days)}d${overflows ? " · spills into next month" : ""}`} />
+                {overflows && <div className="absolute top-0 bottom-0 right-0 w-1.5 bg-warn-ink/90" title={`spills into next month — finishes ${fmtDate(r.end)}`} aria-hidden="true" />}
                 {todayPct !== null && <div className="absolute top-0 bottom-0 w-px bg-bad/80" style={{ left: `${todayPct}%` }} title={`today · ${todayStr()}`} aria-hidden="true" />}
               </div>
               <div className="w-32 shrink-0 text-right font-mono text-[11px] text-ink-soft tnum">{fmtDate(r.start)}→{fmtDate(r.end)}</div>
@@ -1767,10 +1801,10 @@ function MachineLoading({ data, reload, month = curMonth() }) {
 
   const addLine = async () => {
     if (busy || !compId || !qty) return; setBusy(true); setErr("");
-    try { await db.addMachinePlanLine({ month, machine_id: sel.id, component_id: compId, qty: parseInt(qty, 10) || 0, seq: lines.length }); setQty(""); await reload(); }
+    try { await db.addMachinePlanLine({ month, machine_id: sel.id, component_id: compId, qty: cleanInt(qty) ?? 0, seq: lines.length }); setQty(""); await reload(); }
     catch (e) { setErr(e.message || "Failed to add"); } finally { setBusy(false); }
   };
-  const editQty = async (id, v) => { try { setErr(""); await db.updateMachinePlanLine(id, { qty: parseInt(v, 10) || 0 }); await reload(); } catch (e) { setErr(e?.message || "Quantity didn't save — please retry."); } };
+  const editQty = async (id, v) => { const q = cleanInt(v); if (q === null) return; try { setErr(""); await db.updateMachinePlanLine(id, { qty: q }); await reload(); } catch (e) { setErr(e?.message || "Quantity didn't save — please retry."); } };
   const confirmDel = async () => { if (delBusy || !delLine) return; setDelBusy(true); try { await db.removeMachinePlanLine(delLine.id); await reload(); setDelLine(null); } catch { /* keep */ } finally { setDelBusy(false); } };
   // Run-order control: the Gantt schedules strictly in seq order, so swapping seq
   // with a neighbour is how you say "run part B first" (was delete-and-retype).
@@ -1782,7 +1816,12 @@ function MachineLoading({ data, reload, month = curMonth() }) {
       setErr("");
       // index-based renumber (not a raw swap) — survives duplicate seq values
       await db.updateMachinePlanLine(l.id, { seq: idx + dirn });
-      await db.updateMachinePlanLine(other.id, { seq: idx });
+      try {
+        await db.updateMachinePlanLine(other.id, { seq: idx });
+      } catch (e2) {
+        await db.updateMachinePlanLine(l.id, { seq: idx }).catch(() => {}); // roll the first write back so we never leave two lines with a wrong/duplicate run-order
+        throw e2;
+      }
       await reload();
     } catch (e) { setErr(e?.message || "Re-ordering failed — please retry."); }
   };
@@ -1898,14 +1937,24 @@ function ExcelImport({ data, reload }) {
   const [done, setDone] = useState("");
   const [err, setErr] = useState("");
 
+  // CONFIDENT match = the component's code appears as a whole token in the row
+  // (word-boundary — never a loose substring that lets a short code collide).
+  // FUZZY match = a name token matched, accepted ONLY when exactly one component
+  // matches (no ambiguity), and flagged for review so a cycle-time can't silently
+  // bind to the wrong part. Ambiguous (≥2 name matches) → unmatched on purpose.
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const matchComp = (desc, comps) => {
     const d = (desc || "").toLowerCase();
-    for (const c of comps) if (c.code && d.includes(String(c.code).toLowerCase())) return c;
+    const dtoks = new Set(d.split(/[^a-z0-9]+/).filter(Boolean));
     for (const c of comps) {
-      const toks = (c.name || "").toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 3);
-      if (toks.some((t) => d.includes(t))) return c;
+      const code = String(c.code || "").toLowerCase();
+      if (code && (dtoks.has(code) || new RegExp(`(^|[^a-z0-9])${esc(code)}([^a-z0-9]|$)`).test(d))) return { comp: c, fuzzy: false };
     }
-    return null;
+    const hits = comps.filter((c) => {
+      const toks = (c.name || "").toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 3);
+      return toks.some((t) => dtoks.has(t));
+    });
+    return hits.length === 1 ? { comp: hits[0], fuzzy: true } : { comp: null, fuzzy: false };
   };
 
   const onFile = async (e) => {
@@ -1930,14 +1979,15 @@ function ExcelImport({ data, reload }) {
           const opno = Number(r[6]); const cy = Number(r[7]); const st = Number(r[8]); const ins = Number(r[9]) || 60;
           if (!desc || !Number.isFinite(opno) || opno <= 0 || !Number.isFinite(cy)) continue;
           if (/descrip|pallet|shift/i.test(desc)) continue;
-          const c = matchComp(desc, comps);
+          const m = matchComp(desc, comps);
+          const c = m.comp;
           const key = c ? `${c.id}|${opno}` : `?${desc}|${opno}`;
-          found[key] = { desc, op_no: opno, cycle: cy, setup: st || 0, ins, comp: c };
+          found[key] = { desc, op_no: opno, cycle: cy, setup: st || 0, ins, comp: c, fuzzy: m.fuzzy };
         }
       }
       const list = Object.values(found).sort((a, b) => (a.comp?.name || a.desc).localeCompare(b.comp?.name || b.desc) || a.op_no - b.op_no);
       if (!list.length) { setErr("No operation rows found in a current-year plan sheet. Is this the HMC&VMC plan file?"); }
-      else setPreview({ list, matched: list.filter((x) => x.comp).length, unmatched: list.filter((x) => !x.comp).length });
+      else setPreview({ list, matched: list.filter((x) => x.comp).length, unmatched: list.filter((x) => !x.comp).length, fuzzy: list.filter((x) => x.comp && x.fuzzy).length });
     } catch (ex) { setErr("Could not read the file: " + (ex.message || ex)); }
     finally { setBusy(false); e.target.value = ""; }
   };
@@ -1970,13 +2020,13 @@ function ExcelImport({ data, reload }) {
       {done && <div className={`${hintCls} mt-3`}><Check size={14} className="text-ok-ink shrink-0 mt-0.5" /><span>{done}</span></div>}
       {preview && (
         <div className="mt-4">
-          <div className="text-sm text-ink-soft mb-2"><b className="text-ink">{preview.matched}</b> operations matched to your parts{preview.unmatched ? `, ${preview.unmatched} unmatched (will be skipped)` : ""}:</div>
+          <div className="text-sm text-ink-soft mb-2"><b className="text-ink">{preview.matched}</b> operations matched to your parts{preview.unmatched ? `, ${preview.unmatched} unmatched (will be skipped)` : ""}{preview.fuzzy ? `, ${preview.fuzzy} matched by name only — check the “review” rows` : ""}:</div>
           <div className="max-h-56 overflow-y-auto border border-hair rounded-lg">
             <table className="w-full text-[12px]">
               <tbody>
                 {preview.list.map((o, i) => (
                   <tr key={i} className="border-b border-hair last:border-0">
-                    <td className="py-1.5 px-2.5 font-semibold">{o.comp ? o.comp.name : <span className="text-warn-ink">{o.desc} · no match</span>}</td>
+                    <td className="py-1.5 px-2.5 font-semibold">{o.comp ? <>{o.comp.name}{o.fuzzy && <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-warn-ink border border-hair rounded px-1.5 py-0.5">review</span>}</> : <span className="text-warn-ink">{o.desc} · no match</span>}</td>
                     <td className="py-1.5 px-2.5 font-mono text-ink-dim">op{o.op_no}</td>
                     <td className="py-1.5 px-2.5 font-mono text-right text-ink-soft tnum">cy {o.cycle} · set {o.setup}</td>
                   </tr>
@@ -2004,8 +2054,8 @@ function SettingsPanel({ data, reload }) {
   const [retire, setRetire] = useState(null); const [retireBusy, setRetireBusy] = useState(false);
   const [showRetired, setShowRetired] = useState(false); const [retired, setRetired] = useState([]);
   const guard = async (fn) => { try { setSErr(""); await fn(); await reload(); } catch (e) { setSErr(e?.message || "That change didn't save — please retry."); } };
-  const saveHr = () => guard(async () => { await db.setSetting("target_hr", parseInt(hr, 10) || 2200); setSaved(true); setTimeout(() => setSaved(false), 1500); });
-  const saveMr = () => guard(async () => { await db.setSetting("machine_rate", parseInt(mr, 10) || 1200); setSavedMr(true); setTimeout(() => setSavedMr(false), 1500); });
+  const saveHr = () => { const h = cleanInt(hr); if (!h) return; guard(async () => { await db.setSetting("target_hr", h); setSaved(true); setTimeout(() => setSaved(false), 1500); }); };
+  const saveMr = () => { const m = cleanInt(mr); if (!m) return; guard(async () => { await db.setSetting("machine_rate", m); setSavedMr(true); setTimeout(() => setSavedMr(false), 1500); }); };
   const saveMachine = (id, field, v) => guard(() => db.setMachine(id, { [field]: Math.max(1, parseInt(v, 10) || 1) }));
   const renameMachine = (id, v, old) => { const name = String(v || "").trim(); if (name && name !== old) guard(() => db.setMachine(id, { name })); };
   const addMachine = async () => {
@@ -2129,15 +2179,20 @@ function OperationsPanel({ data, reload }) {
   const cap = componentCapacity(ops, qty);
 
   const addOp = async () => {
-    if (busy || !opNo) return; setBusy(true); setErr("");
+    if (busy || !opNo) return;
+    const op = cleanInt(opNo);
+    if (!op) { setErr("Operation number must be a positive whole number."); return; } // 0/blank/negative/NaN rejected
+    setBusy(true); setErr("");
     try {
-      await db.addOperation({ component_id: sel.id, op_no: parseInt(opNo, 10), description: desc.trim(), cycle_time: parseFloat(cyc) || 0, setup_time: parseFloat(setup) || 0, insertion_time: parseFloat(ins) || 0 });
+      await db.addOperation({ component_id: sel.id, op_no: op, description: desc.trim(), cycle_time: cleanNum(cyc) ?? 0, setup_time: cleanNum(setup) ?? 0, insertion_time: cleanNum(ins) ?? 0 });
       setOpNo(""); setDesc(""); setCyc(""); setSetup(""); setIns("60"); await reload();
     } catch (e) { setErr(e.message || "Failed to add operation"); }
     finally { setBusy(false); }
   };
   const editField = async (id, field, value) => {
-    const v = field === "description" ? value : (parseFloat(value) || 0);
+    let v;
+    if (field === "description") v = value;
+    else { v = cleanNum(value); if (v === null) return; } // blank/negative/NaN → keep the saved value, don't corrupt it
     // surface failures — a silently-swallowed reject left the cell looking saved when it wasn't
     try { setErr(""); await db.updateOperation(id, { [field]: v }); await reload(); } catch (e) { setErr(e?.message || "That operation change didn't save — please retry."); }
   };
@@ -2220,10 +2275,10 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth }) {
 
   const planFor = (cid) => plans.find((p) => p.component_id === cid);
   const guard = async (fn) => { try { setPErr(""); await fn(); await reload(); } catch (e) { setPErr(e?.message || "That change didn't save — please retry."); } };
-  const changeTarget = (cid, v) => guard(() => db.upsertPlan({ month, component_id: cid, target_qty: parseInt(v, 10) || 0, working_days: planFor(cid)?.working_days ?? 24 }));
-  const changeWD = (cid, v) => guard(() => db.upsertPlan({ month, component_id: cid, target_qty: planFor(cid)?.target_qty ?? 0, working_days: Math.max(1, parseInt(v, 10) || 1) }));
+  const changeTarget = (cid, v) => { const t = cleanInt(v); if (t === null) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: t, working_days: planFor(cid)?.working_days ?? 24 })); };
+  const changeWD = (cid, v) => { const wd = cleanInt(v); if (!wd) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: planFor(cid)?.target_qty ?? 0, working_days: wd })); };
   const editComp = (id, fields) => guard(() => db.updateComponent(id, fields));
-  const editRate = (id, v) => guard(() => db.setComponentRate(id, parseFloat(v) || 0));
+  const editRate = (id, v) => { const r = cleanNum(v); if (r === null) return; guard(() => db.setComponentRate(id, r)); };
   const addComponent = async () => { if (!name.trim() || adding) return; setAdding(true); try { await db.addComponent({ code: code.trim(), name: name.trim(), industry }); setName(""); setCode(""); setPErr(""); await reload(); } catch (e) { setPErr(e?.message || "Could not add the component."); } finally { setAdding(false); } };
   // Destructive: only runs after the focus-trapped ConfirmDialog is confirmed.
   const confirmRemoveComponent = async () => {
@@ -2250,10 +2305,14 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth }) {
       if (!prevPlans.length && !prevLines.length) { setPErr(`Nothing planned in ${prettyMonth(prev)} to copy.`); return; }
       for (const p of prevPlans) await db.upsertPlan({ month, component_id: p.component_id, target_qty: p.target_qty, working_days: p.working_days });
       const existing = data.machinePlan || [];
-      let seq = existing.length;
+      // run-order is PER MACHINE — seed each machine's next seq from its own max(seq)+1
+      // (not the global array length, which collided with existing lines / seq gaps).
+      const nextSeq = {};
+      for (const x of existing) nextSeq[x.machine_id] = Math.max(nextSeq[x.machine_id] ?? -1, Number(x.seq) || 0);
       for (const l of prevLines) {
         if (existing.some((x) => x.machine_id === l.machine_id && x.component_id === l.component_id)) continue;
-        await db.addMachinePlanLine({ month, machine_id: l.machine_id, component_id: l.component_id, qty: l.qty, seq: seq++ });
+        const seq = (nextSeq[l.machine_id] = (nextSeq[l.machine_id] ?? -1) + 1);
+        await db.addMachinePlanLine({ month, machine_id: l.machine_id, component_id: l.component_id, qty: l.qty, seq });
       }
       await reload();
     } catch (e) { setPErr(e?.message || "Copy failed — please retry."); }

@@ -94,17 +94,26 @@ Deno.serve(async (req: Request) => {
   const svc = createClient(url, secretKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const ipBucket = `op:ip:${ip}`;
   const pinBucket = `op:pin:${pin}`;
+  const globalBucket = `op:global`; // IP-independent — a spoofed x-forwarded-for can't dodge this one
   try {
-    const [{ data: ipOk }, { data: pinOk }] = await Promise.all([
+    const [{ data: ipOk }, { data: pinOk }, { data: globalOk }] = await Promise.all([
       svc.rpc("hit_login_throttle", { p_bucket: ipBucket, p_limit: num(Deno.env.get("OP_IP_LIMIT"), 40), p_window_secs: num(Deno.env.get("OP_IP_WINDOW"), 300) }),
       svc.rpc("hit_login_throttle", { p_bucket: pinBucket, p_limit: num(Deno.env.get("OP_PIN_LIMIT"), 6), p_window_secs: num(Deno.env.get("OP_PIN_WINDOW"), 900) }),
+      svc.rpc("hit_login_throttle", { p_bucket: globalBucket, p_limit: num(Deno.env.get("OP_GLOBAL_LIMIT"), 120), p_window_secs: num(Deno.env.get("OP_GLOBAL_WINDOW"), 300) }),
     ]);
-    if (ipOk === false || pinOk === false) {
+    // The per-PIN and the GLOBAL buckets are the real anti-enumeration brakes: the
+    // per-IP bucket alone is bypassable by rotating a spoofed x-forwarded-for, and
+    // each guessed PIN gets its own per-PIN budget — only the global cap bounds a
+    // wide horizontal sweep regardless of IP/PIN-key cardinality. Default 120/5min
+    // is far above legit shift-change volume but caps a sweep (env-tunable).
+    if (ipOk === false || pinOk === false || globalOk === false) {
       return json({ error: "Too many attempts. Please wait a minute and try again." }, 429);
     }
-  } catch (_e) {
-    // Throttle RPC unavailable → fail OPEN (never lock the shop floor out over a
-    // throttle hiccup); the PIN check below is still the real gate.
+  } catch (e) {
+    // Throttle store unavailable → fail OPEN (never lock the 24/7 floor out over a
+    // throttle hiccup) but log LOUDLY so an outage of the brake is visible instead
+    // of silently disabling brute-force protection. The PIN check below still gates.
+    console.error("operator-login: throttle store unavailable, failing open:", String((e as Error)?.message || e));
   }
 
   const supabase = createClient(url, anon, {

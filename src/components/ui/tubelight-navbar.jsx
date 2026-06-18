@@ -40,7 +40,7 @@ export function NavBar({ items, className, activeTab: controlledTab, onItemClick
               type="button"
               aria-current={isActive ? "page" : undefined}
               onClick={() => {
-                setInternalTab(item.name);
+                if (controlledTab === undefined) setInternalTab(item.name); // only own the state when uncontrolled — avoids dead writes + desync when the parent controls activeTab
                 if (onItemClick) onItemClick(item);
               }}
               className={cn(

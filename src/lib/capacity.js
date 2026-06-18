@@ -12,8 +12,9 @@ export const EFF_FACTOR = 1.05;
 export const LB_DIVISOR = 12;
 
 // Hours/days for one operation producing `qty` pieces.
+const fin = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; }; // a stray null/"" from the DB must not become NaN and poison the whole rollup
 export function opHours({ qty = 0, cycle_time = 0, setup_time = 0, insertion_time = 60 }) {
-  const mc = (Number(qty) * Number(cycle_time) + Number(setup_time) + Number(insertion_time)) / 60;
+  const mc = (fin(qty) * fin(cycle_time) + fin(setup_time) + fin(insertion_time)) / 60;
   const lb = mc / LB_DIVISOR;
   const total = mc + lb;
   const eff = total * EFF_FACTOR;

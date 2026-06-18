@@ -61,9 +61,10 @@ export const db = {
     });
     if (sErr) return null;
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-    const p = await profileOf(user.id);
-    return p && p.role === "operator" && p.active ? p : null;
+    const p = user ? await profileOf(user.id) : null;
+    if (p && p.role === "operator" && p.active) return p;
+    await supabase.auth.signOut(); // reject → don't leave a half-set operator session on the shared client
+    return null;
   },
 
   async loginByCredentials(username, password) {
@@ -75,7 +76,31 @@ export const db = {
     });
     if (error || !data?.user) return null;
     const p = await profileOf(data.user.id);
-    return p && (p.role === "supervisor" || p.role === "admin") && p.active ? p : null;
+    if (p && (p.role === "supervisor" || p.role === "admin") && p.active) return p;
+    await supabase.auth.signOut(); // valid creds but not an active manager → drop the session
+    return null;
+  },
+
+  // Re-establish the UI session from a persisted token on boot (page reload),
+  // re-gating by role + active. Returns the profile, or null (and signs out) if
+  // the session is stale / the user was deactivated. Fixes "reload → login".
+  async restoreSession() {
+    if (!supabase) return null;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+    const { data: { user } } = await supabase.auth.getUser();
+    const p = user ? await profileOf(user.id) : null;
+    if (p && p.active && (p.role === "operator" || p.role === "supervisor" || p.role === "admin")) return p;
+    await supabase.auth.signOut();
+    return null;
+  },
+
+  // Subscribe to auth lifecycle so the UI can drop a user on SIGNED_OUT (token
+  // revoked by a deactivation, or expired). Returns an unsubscribe fn. No-op in demo.
+  onAuthStateChange(cb) {
+    if (!supabase) return () => {};
+    const { data } = supabase.auth.onAuthStateChange((event) => cb(event));
+    return () => { try { data.subscription.unsubscribe(); } catch { /* ignore */ } };
   },
 
   // ---- COMPONENTS ----------------------------------------------------------
