@@ -63,7 +63,7 @@ export const db = {
     const { data: { user } } = await supabase.auth.getUser();
     const p = user ? await profileOf(user.id) : null;
     if (p && p.role === "operator" && p.active) return p;
-    await supabase.auth.signOut(); // reject → don't leave a half-set operator session on the shared client
+    await supabase.auth.signOut({ scope: "local" }); // reject → clear ONLY this client's half-set session; never revoke the user's other devices (default scope is global)
     return null;
   },
 
@@ -77,7 +77,7 @@ export const db = {
     if (error || !data?.user) return null;
     const p = await profileOf(data.user.id);
     if (p && (p.role === "supervisor" || p.role === "admin") && p.active) return p;
-    await supabase.auth.signOut(); // valid creds but not an active manager → drop the session
+    await supabase.auth.signOut({ scope: "local" }); // not an active manager → clear ONLY this client's session (never the user's other devices)
     return null;
   },
 
@@ -91,7 +91,7 @@ export const db = {
     const { data: { user } } = await supabase.auth.getUser();
     const p = user ? await profileOf(user.id) : null;
     if (p && p.active && (p.role === "operator" || p.role === "supervisor" || p.role === "admin")) return p;
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "local" }); // stale/deactivated token → clear locally only; deactivation revokes server-side via revoke_user_sessions()
     return null;
   },
 

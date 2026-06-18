@@ -1733,7 +1733,11 @@ function MachineSchedule({ machine, lines, operations, components, month = curMo
         {rows.map((r, i) => {
           const left = Math.max(0, ((r.start.getTime() - first.getTime()) / totalMs) * 100);
           const width = Math.max(1.5, ((r.end.getTime() - r.start.getTime()) / totalMs) * 100);
-          const overflows = r.end.getTime() > last.getTime(); // operation legitimately runs past this month — the bar is clamped to the box, so flag it
+          // `last` is MIDNIGHT of the final day, so a plain `end > last` flags any op
+          // finishing DURING the last day. Compare against the exclusive next-month
+          // boundary so only ops that truly run into the next month are flagged.
+          const monthEndExclusive = new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1).getTime();
+          const overflows = r.end.getTime() >= monthEndExclusive;
           // today marker — without it a mid-month Gantt reads as "all done"
           const todayMs = Date.now() - first.getTime();
           const todayPct = todayMs > 0 && todayMs < totalMs ? (todayMs / totalMs) * 100 : null;

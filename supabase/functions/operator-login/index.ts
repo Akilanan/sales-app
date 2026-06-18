@@ -101,13 +101,18 @@ Deno.serve(async (req: Request) => {
       svc.rpc("hit_login_throttle", { p_bucket: pinBucket, p_limit: num(Deno.env.get("OP_PIN_LIMIT"), 6), p_window_secs: num(Deno.env.get("OP_PIN_WINDOW"), 900) }),
       svc.rpc("hit_login_throttle", { p_bucket: globalBucket, p_limit: num(Deno.env.get("OP_GLOBAL_LIMIT"), 120), p_window_secs: num(Deno.env.get("OP_GLOBAL_WINDOW"), 300) }),
     ]);
-    // The per-PIN and the GLOBAL buckets are the real anti-enumeration brakes: the
-    // per-IP bucket alone is bypassable by rotating a spoofed x-forwarded-for, and
-    // each guessed PIN gets its own per-PIN budget — only the global cap bounds a
-    // wide horizontal sweep regardless of IP/PIN-key cardinality. Default 120/5min
-    // is far above legit shift-change volume but caps a sweep (env-tunable).
-    if (ipOk === false || pinOk === false || globalOk === false) {
+    // Hard brakes = per-IP and per-PIN only. A legit operator with a healthy per-PIN
+    // bucket is NEVER denied by a shared counter.
+    if (ipOk === false || pinOk === false) {
       return json({ error: "Too many attempts. Please wait a minute and try again." }, 429);
+    }
+    // The GLOBAL bucket is FAIL-SOFT — a visibility signal, not a gate. A shared
+    // hard-429 would let one burst (attacker or runaway retry loop) lock out the
+    // ENTIRE 24/7 floor, which the project forbids. So on a high global volume we
+    // log loudly (a wide enumeration sweep becomes visible) but still let the
+    // request through; the per-IP + per-PIN brakes remain the real gate.
+    if (globalOk === false) {
+      console.warn(`operator-login: GLOBAL attempt volume high this window (possible enumeration sweep) ip=${ip}`);
     }
   } catch (e) {
     // Throttle store unavailable → fail OPEN (never lock the 24/7 floor out over a
