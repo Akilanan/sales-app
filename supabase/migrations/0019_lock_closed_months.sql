@@ -37,3 +37,8 @@ drop trigger if exists trg_machine_plan_lines_lock on public.machine_plan_lines;
 create trigger trg_machine_plan_lines_lock
   before insert or update or delete on public.machine_plan_lines
   for each row execute function public.block_closed_month_writes();
+
+-- A trigger function fires via the trigger mechanism, not via EXECUTE — so revoke
+-- the default RPC grant so it can't be reached at /rest/v1/rpc/ (it errors out of
+-- trigger context anyway, but this closes the exposed surface / silences the lint).
+revoke execute on function public.block_closed_month_writes() from anon, authenticated, public;
