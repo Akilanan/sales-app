@@ -334,7 +334,7 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
   const [view, setView] = useState("dashboard");
-  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [], settings: {}, users: [] });
+  const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [], settings: {}, users: [], breakdowns: [], componentMachines: [] });
   const [dataReady, setDataReady] = useState(false); // first post-login fetch landed → swap skeleton for real panels
   const [dir, setDir] = useState(1); // view-swap slide direction (sign of tab-index delta)
   const [month, setMonth] = useState(curMonth()); // the VIEWED month — switchable for history review / pre-planning
@@ -359,9 +359,9 @@ export default function App() {
     const m = month; // capture — the month this fetch belongs to
     const seq = ++loadSeq.current; // claim this fetch; a newer one bumps the id
     const [components, machines] = await Promise.all([db.listComponents(), db.listMachines()]);
-    const [plans, entries, operations, machinePlan, settings, users] = await Promise.all([db.getPlans(m), db.listEntries({ month: m }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(m) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({}), db.listUsersLite ? db.listUsersLite() : Promise.resolve([])]);
+    const [plans, entries, operations, machinePlan, settings, users, breakdowns, componentMachines] = await Promise.all([db.getPlans(m), db.listEntries({ month: m }), db.listOperations ? db.listOperations() : Promise.resolve([]), db.listMachinePlanLines ? db.listMachinePlanLines(m) : Promise.resolve([]), db.getSettings ? db.getSettings() : Promise.resolve({}), db.listUsersLite ? db.listUsersLite() : Promise.resolve([]), db.listBreakdowns ? db.listBreakdowns(m) : Promise.resolve([]), db.listAllowedMachines ? db.listAllowedMachines() : Promise.resolve([])]);
     if (seq !== loadSeq.current) return; // a newer month switch / refetch superseded us → drop this stale (possibly out-of-order) result
-    setData({ components, machines, plans, entries, operations, machinePlan, settings, users });
+    setData({ components, machines, plans, entries, operations, machinePlan, settings, users, breakdowns, componentMachines });
     setDataMonth(m); // mark which month the loaded data is for (drives the switch-skeleton)
   }, [month]);
 
@@ -1911,6 +1911,22 @@ function MachineLoading({ data, reload, month = curMonth() }) {
             <MetalButton onClick={addLine} disabled={!compId || !qty || busy} className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
           </div>
         </div>
+        {/* live LOADABILITY check — can this machine take this part+qty? */}
+        {compId && qty && (() => {
+          const pOps = compOps(compId);
+          const need = componentCapacity(pOps, cleanInt(qty) ?? 0).days; // 3-shift-equiv days this part+qty needs
+          const spare = selCap - selDays;  // free days on the selected machine
+          const after = spare - need;      // free days left if we add it
+          const noOps = pOps.length === 0;
+          const ok = after >= -0.05;
+          return (
+            <div role="status" className={`mt-3 flex items-start gap-2 rounded-lg border border-hair bg-inset px-3 py-2.5 text-sm ${noOps ? "text-warn-ink" : ok ? "text-ok-ink" : "text-bad-ink"}`}>
+              {noOps ? <><AlertTriangle size={15} className="shrink-0 mt-0.5" /><span>No operations defined for this part — add them in <b>Plan Setup → Routing</b> so the app can size its load.</span></>
+                : ok ? <><Check size={15} className="shrink-0 mt-0.5" /><span><b>Loadable on {sel.name}</b> — needs {round1(need)}d; {round1(after)}d of {round1(Math.max(0, spare))}d free will remain after.</span></>
+                : <><AlertTriangle size={15} className="shrink-0 mt-0.5" /><span><b>Over capacity</b> — needs {round1(need)}d but only {round1(Math.max(0, spare))}d is free ({round1(-after)}d over). You can still add it, but {sel.name} will be overbooked this month.</span></>}
+            </div>
+          );
+        })()}
         {err && <div role="alert" className={`${errCls} mt-3`}><AlertTriangle size={15} className="shrink-0" />{err}</div>}
         <div className={`${hintCls} mt-3`}><Check size={14} className="shrink-0 mt-0.5 text-ok-ink" /><span>Each part's days come from its operations (Plan Setup → Routing). If a part shows "none" ops, define its operations there first. Over 100% means the machine is overbooked for the month.</span></div>
       </Panel>

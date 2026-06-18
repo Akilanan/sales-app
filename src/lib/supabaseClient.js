@@ -203,6 +203,36 @@ export const db = {
     if (error) throw error;
   },
 
+  // ---- MACHINE BREAKDOWNS (a machine marked down for a month) ---------------
+  async listBreakdowns(month) {
+    const { data, error } = await supabase.from("machine_breakdowns").select("machine_id, month, note").eq("month", `${month}-01`);
+    if (error) return []; // operators may lack read access — degrade quietly
+    return data || [];
+  },
+  async setMachineDown(machineId, month, note = null) {
+    const { error } = await supabase.from("machine_breakdowns").upsert({ machine_id: machineId, month: `${month}-01`, note }, { onConflict: "machine_id,month" });
+    if (error) throw error;
+  },
+  async clearMachineDown(machineId, month) {
+    const { error } = await supabase.from("machine_breakdowns").delete().eq("machine_id", machineId).eq("month", `${month}-01`);
+    if (error) throw error;
+  },
+
+  // ---- MACHINE ELIGIBILITY (which machines a part may run on) ---------------
+  async listAllowedMachines() {
+    const { data, error } = await supabase.from("component_machines").select("component_id, machine_id");
+    if (error) return [];
+    return data || [];
+  },
+  async addAllowedMachine(componentId, machineId) {
+    const { error } = await supabase.from("component_machines").upsert({ component_id: componentId, machine_id: machineId }, { onConflict: "component_id,machine_id" });
+    if (error) throw error;
+  },
+  async removeAllowedMachine(componentId, machineId) {
+    const { error } = await supabase.from("component_machines").delete().eq("component_id", componentId).eq("machine_id", machineId);
+    if (error) throw error;
+  },
+
   // ---- MACHINES ------------------------------------------------------------
   async listMachines() {
     const { data, error } = await supabase
