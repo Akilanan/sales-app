@@ -99,20 +99,23 @@ Deno.serve(async (req: Request) => {
     const [{ data: ipOk }, { data: pinOk }, { data: globalOk }] = await Promise.all([
       svc.rpc("hit_login_throttle", { p_bucket: ipBucket, p_limit: num(Deno.env.get("OP_IP_LIMIT"), 40), p_window_secs: num(Deno.env.get("OP_IP_WINDOW"), 300) }),
       svc.rpc("hit_login_throttle", { p_bucket: pinBucket, p_limit: num(Deno.env.get("OP_PIN_LIMIT"), 6), p_window_secs: num(Deno.env.get("OP_PIN_WINDOW"), 900) }),
-      svc.rpc("hit_login_throttle", { p_bucket: globalBucket, p_limit: num(Deno.env.get("OP_GLOBAL_LIMIT"), 120), p_window_secs: num(Deno.env.get("OP_GLOBAL_WINDOW"), 300) }),
+      svc.rpc("hit_login_throttle", { p_bucket: globalBucket, p_limit: num(Deno.env.get("OP_GLOBAL_LIMIT"), 300), p_window_secs: num(Deno.env.get("OP_GLOBAL_WINDOW"), 300) }),
     ]);
     // Hard brakes = per-IP and per-PIN only. A legit operator with a healthy per-PIN
     // bucket is NEVER denied by a shared counter.
     if (ipOk === false || pinOk === false) {
       return json({ error: "Too many attempts. Please wait a minute and try again." }, 429);
     }
-    // The GLOBAL bucket is FAIL-SOFT — a visibility signal, not a gate. A shared
-    // hard-429 would let one burst (attacker or runaway retry loop) lock out the
-    // ENTIRE 24/7 floor, which the project forbids. So on a high global volume we
-    // log loudly (a wide enumeration sweep becomes visible) but still let the
-    // request through; the per-IP + per-PIN brakes remain the real gate.
+    // The GLOBAL bucket is the ONLY counter a spoofed x-forwarded-for cannot dodge,
+    // so it MUST be a hard gate — otherwise per-IP throttling is bypassable by header
+    // rotation and PIN enumeration is effectively unthrottled. The ceiling
+    // (OP_GLOBAL_LIMIT, default 300/5min ≈ 60/min) sits far above real shift-change
+    // traffic for a ~dozen-operator floor, so legitimate logins never reach it, but a
+    // thousands-of-tries sweep is stopped cold. Raise OP_GLOBAL_LIMIT if a bigger
+    // floor ever trips it.
     if (globalOk === false) {
-      console.warn(`operator-login: GLOBAL attempt volume high this window (possible enumeration sweep) ip=${ip}`);
+      console.warn(`operator-login: GLOBAL attempt ceiling hit this window (possible enumeration sweep) ip=${ip}`);
+      return json({ error: "Too many attempts right now. Please wait a minute and try again." }, 429);
     }
   } catch (e) {
     // Throttle store unavailable → fail OPEN (never lock the 24/7 floor out over a

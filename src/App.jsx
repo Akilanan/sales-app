@@ -346,6 +346,7 @@ export default function App() {
   const [view, setView] = useState("dashboard");
   const [data, setData] = useState({ components: [], machines: [], plans: [], entries: [], operations: [], machinePlan: [], settings: {}, users: [], breakdowns: [], componentMachines: [] });
   const [dataReady, setDataReady] = useState(false); // first post-login fetch landed → swap skeleton for real panels
+  const [loadErr, setLoadErr] = useState(""); // a data fetch (login / month-switch / live) failed → show a retry banner, never a frozen skeleton
   const [dir, setDir] = useState(1); // view-swap slide direction (sign of tab-index delta)
   const [month, setMonth] = useState(curMonth()); // the VIEWED month — switchable for history review / pre-planning
   const [dataMonth, setDataMonth] = useState(curMonth()); // month the loaded `data` is for — when ≠ month, a switch is in flight
@@ -369,39 +370,48 @@ export default function App() {
     const m = month; // capture — the month this fetch belongs to
     const seq = ++loadSeq.current; // claim this fetch; a newer one bumps the id
     const isManager = u?.role === "supervisor" || u?.role === "admin";
-    // Operators get ONLY what Shift Entry needs — parts, machines, their own
-    // entries, the month's quantity targets. Everything financial / planning-detail
-    // (rates, loading plan, routing, costing settings, breakdowns, eligibility, the
-    // user list) is managers-only; RLS now enforces this server-side, and gating the
-    // fetch by role just avoids dead requests for data operators can't read.
-    const [components, machines, plans, entries] = await Promise.all([db.listComponents(), db.listMachines(), db.getPlans(m), db.listEntries({ month: m })]);
-    let operations = [], machinePlan = [], settings = {}, users = [], breakdowns = [], componentMachines = [], rates = [];
-    if (isManager) {
-      [operations, machinePlan, settings, users, breakdowns, componentMachines, rates] = await Promise.all([
-        db.listOperations ? db.listOperations() : Promise.resolve([]),
-        db.listMachinePlanLines ? db.listMachinePlanLines(m) : Promise.resolve([]),
-        db.getSettings ? db.getSettings() : Promise.resolve({}),
-        db.listUsersLite ? db.listUsersLite() : Promise.resolve([]),
-        db.listBreakdowns ? db.listBreakdowns(m) : Promise.resolve([]),
-        db.listAllowedMachines ? db.listAllowedMachines() : Promise.resolve([]),
-        db.listComponentRates ? db.listComponentRates() : Promise.resolve([]),
-      ]);
+    try {
+      // Operators get ONLY what Shift Entry needs — parts, machines, their own
+      // entries, the month's quantity targets. Everything financial / planning-detail
+      // (rates, loading plan, routing, costing settings, breakdowns, eligibility, the
+      // user list) is managers-only; RLS now enforces this server-side, and gating the
+      // fetch by role just avoids dead requests for data operators can't read.
+      const [components, machines, plans, entries] = await Promise.all([db.listComponents(), db.listMachines(), db.getPlans(m), db.listEntries({ month: m })]);
+      let operations = [], machinePlan = [], settings = {}, users = [], breakdowns = [], componentMachines = [], rates = [];
+      if (isManager) {
+        [operations, machinePlan, settings, users, breakdowns, componentMachines, rates] = await Promise.all([
+          db.listOperations ? db.listOperations() : Promise.resolve([]),
+          db.listMachinePlanLines ? db.listMachinePlanLines(m) : Promise.resolve([]),
+          db.getSettings ? db.getSettings() : Promise.resolve({}),
+          db.listUsersLite ? db.listUsersLite() : Promise.resolve([]),
+          db.listBreakdowns ? db.listBreakdowns(m) : Promise.resolve([]),
+          db.listAllowedMachines ? db.listAllowedMachines() : Promise.resolve([]),
+          db.listComponentRates ? db.listComponentRates() : Promise.resolve([]),
+        ]);
+      }
+      if (seq !== loadSeq.current) return; // a newer month switch / refetch superseded us → drop this stale result
+      // Merge the managers-only ₹ rate back onto each component so all existing c.rate
+      // UI keeps working; operators never receive it. (localDb keeps rate on the
+      // component, so fall back to c.rate when component_rates isn't present.)
+      const rateById = Object.fromEntries((rates || []).map((r) => [r.component_id, r.rate]));
+      const comps = components.map((c) => ({ ...c, rate: rateById[c.id] ?? c.rate ?? 0 }));
+      setData({ components: comps, machines, plans, entries, operations, machinePlan, settings, users, breakdowns, componentMachines });
+      setLoadErr("");
+    } catch (e) {
+      if (seq !== loadSeq.current) return; // a newer fetch owns the UI now — don't surface our stale error
+      // Never throw out of loadData: a login / month-switch / live-sync failure must
+      // surface a retry banner, not freeze the user on the skeleton forever.
+      setLoadErr(e?.message || "Couldn't load data — check your connection and tap Retry.");
+    } finally {
+      if (seq === loadSeq.current) setDataMonth(m); // clear the switch/login skeleton even on failure (guarded so a superseded fetch can't roll dataMonth back)
     }
-    if (seq !== loadSeq.current) return; // a newer month switch / refetch superseded us → drop this stale result
-    // Merge the managers-only ₹ rate back onto each component so all existing c.rate
-    // UI keeps working; operators never receive it. (localDb keeps rate on the
-    // component, so fall back to c.rate when component_rates isn't present.)
-    const rateById = Object.fromEntries((rates || []).map((r) => [r.component_id, r.rate]));
-    const comps = components.map((c) => ({ ...c, rate: rateById[c.id] ?? c.rate ?? 0 }));
-    setData({ components: comps, machines, plans, entries, operations, machinePlan, settings, users, breakdowns, componentMachines });
-    setDataMonth(m); // mark which month the loaded data is for (drives the switch-skeleton)
   }, [month, user]);
 
   // Month switch → refetch (skip while logged out / before the first fetch).
   useEffect(() => { if (user && dataReady) loadData(); }, [loadData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onLogin = async (u) => { setUser(u); setView(u.role === "operator" ? "entry" : "dashboard"); setMonth(curMonth()); await loadData(u); setDataReady(true); }; // pass u — state `user` isn't updated yet this tick
-  const logout = async () => { try { await db.signOut(); } catch { /* ignore */ } setUser(null); setView("dashboard"); setDataReady(false); };
+  const logout = async () => { try { await db.signOut(); } catch { /* ignore */ } setUser(null); setView("dashboard"); setDataReady(false); setLoadErr(""); };
 
   // LIVE SYNC — once signed in, refresh (debounced) whenever anyone logs output
   // or changes a plan/component on any device. RLS keeps each client's data
@@ -410,7 +420,7 @@ export default function App() {
     if (!user) { setLive(false); return; }
     let t;
     const unsub = db.subscribe(
-      () => { clearTimeout(t); t = setTimeout(loadData, 350); },
+      () => { clearTimeout(t); t = setTimeout(() => loadData(), 350); }, // call with NO arg → defaults to current `user`; passing setTimeout's numeric id as `u` made managers refetch operator-scoped
       (connected) => setLive(connected)
     );
     return () => { clearTimeout(t); setLive(false); unsub(); };
@@ -504,6 +514,13 @@ export default function App() {
           </header>
           <div className="pt-20 pb-28 lg:pb-0">
             <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
+              {loadErr && (
+                <div role="alert" className="mb-4 flex items-center gap-3 rounded-xl border border-bad/40 bg-bad-soft/20 px-4 py-3 text-sm text-bad-ink">
+                  <AlertTriangle size={16} className="shrink-0" />
+                  <span className="flex-1">{loadErr}</span>
+                  <button onClick={() => loadData()} className="font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink hover:border-brand-500/40 transition shrink-0">Retry</button>
+                </div>
+              )}
               {/* show a skeleton while a MONTH SWITCH is in flight (data screens only)
                   so the old month's numbers don't linger under the new header */}
               {(() => {
@@ -827,7 +844,7 @@ function Dashboard({ data, live, month = curMonth() }) {
           quality · time), differentiated by micro-viz (gauge / sparkline / rate /
           progress) so they read intentional, not stamped clones. */}
       <m.div variants={containerV} initial="hidden" animate="show" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
-        <Kpi title="Produced today" value={actualToday} unit={`/ ${dailyTargetRounded}`} sub={`${dailyPct}% of today's target`} subLevel={levelForPct(dailyPct)} pct={dailyPct} />
+        <Kpi title="Produced today" value={actualToday} unit={`/ ${dailyTargetRounded}`} sub={noPlan ? "no plan set for today" : `${dailyPct}% of today's target`} subLevel={noPlan ? undefined : levelForPct(dailyPct)} pct={dailyPct} />
         <Kpi title="Avg / working day" value={avgPerDay} unit="units" sub={`over ${workingDaysElapsed} day${workingDaysElapsed === 1 ? "" : "s"} so far`} spark={sparkDaily} sparkLevel={lvl} />
         <Kpi title="Scrap (MTD)" value={scrapMonthly} unit="units" sub={`${scrapRate.toFixed(1)}% of total output`} subLevel={scrapRate > 3 ? "warn" : null} pct={Math.min((scrapRate / 5) * 100, 100)} pctNeutral />
         <Kpi title="Working days left" value={workingDaysLeft} unit={`/ ${totalWorkingDays}`} sub={`${monthProgress}% of the month elapsed`} pct={monthProgress} pctNeutral />
@@ -910,7 +927,7 @@ function Dashboard({ data, live, month = curMonth() }) {
         <Panel title="Today — Plan vs Actual" tag="03" className="lg:col-span-5" right={<span className="font-mono text-ink-dim text-[11px] tnum tracking-wide">{today}</span>}>
           <div className="flex items-end justify-between mb-3">
             <div><Eyebrow className="mb-1 !text-[11px]">Actual</Eyebrow><div className="font-mono text-[40px] font-bold tnum leading-none">{actualToday}</div></div>
-            <StatusPill level={levelForPct(dailyPct)} label={`${dailyPct}%`} />
+            {noPlan ? <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim border border-hair rounded-lg px-2.5 py-1">No plan</span> : <StatusPill level={levelForPct(dailyPct)} label={`${dailyPct}%`} />}
             <div className="text-right"><Eyebrow className="mb-1 !text-[11px]">Target</Eyebrow><div className="font-mono text-[40px] font-bold text-ink-dim tnum leading-none">{Math.round(dailyTargetTotal)}</div></div>
           </div>
           <div className="mb-5"><Meter pct={dailyPct} level={levelForPct(dailyPct)} height="h-2.5" ticks /></div>
@@ -1073,6 +1090,20 @@ function Dashboard({ data, live, month = curMonth() }) {
 }
 
 /* ------------------------------ Shift Entry ------------------------------- */
+// Module-scope on PURPOSE: a component defined inside ShiftEntry gets a fresh
+// identity every render, so React remounts its <input> on each keystroke and the
+// field loses focus mid-typing (you could only tap +/-). Hoisting keeps the input
+// node stable so multi-digit quantities can be typed normally.
+function Stepper({ value, set, label }) {
+  return (
+    <div className="flex items-center gap-3">
+      <button type="button" onClick={() => set(Math.max(0, value - 1))} aria-label={`Decrease ${label || ""}`.trim()} className="w-16 h-16 rounded-xl grid place-items-center active:scale-95 transition ease-spring-out border border-hair bg-inset text-ink hover:border-brand-500/55 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"><Minus size={24} /></button>
+      <input type="number" min="0" inputMode="numeric" aria-label={label} value={value} onChange={(e) => set(Math.max(0, parseInt(e.target.value, 10) || 0))} className="w-24 text-center font-mono text-4xl font-bold tnum bg-inset border border-hair rounded-xl py-2 text-ink focus:border-brand-500 outline-none transition" />
+      <button type="button" onClick={() => set(value + 1)} aria-label={`Increase ${label || ""}`.trim()} className="w-16 h-16 rounded-xl grid place-items-center active:scale-95 transition ease-spring-out border border-hair bg-inset text-ink hover:border-brand-500/55 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"><Plus size={24} /></button>
+    </div>
+  );
+}
+
 function ShiftEntry({ data, user, reload, month = curMonth() }) {
   const { components, machines, entries, plans } = data;
   const [date, setDate] = useState(todayStr());
@@ -1120,6 +1151,27 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); prev?.focus?.(); };
   }, [confirm]);
+
+  // Same ARIA dialog pattern for the manager "Correct entry" modal (was missing it).
+  const editDialogRef = useRef(null);
+  useEffect(() => {
+    if (!editEntry) return;
+    const prev = document.activeElement;
+    const focusables = () => editDialogRef.current
+      ? [...editDialogRef.current.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      : [];
+    focusables()[0]?.focus();
+    const onKey = (e) => {
+      if (e.key === "Escape") { setEditEntry(null); return; }
+      if (e.key !== "Tab") return;
+      const f = focusables(); if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); prev?.focus?.(); };
+  }, [editEntry]);
 
   const isManager = user.role !== "operator";
   const compName = (id) => components.find((c) => c.id === id)?.name || "—";
@@ -1195,14 +1247,6 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
   allMine = [...pending, ...allMine]; // optimistic rows lead until acked
   const recent = showAll ? allMine : allMine.slice(0, 9);
 
-  const Stepper = ({ value, set }) => (
-    <div className="flex items-center gap-3">
-      <button onClick={() => set(Math.max(0, value - 1))} aria-label="Decrease" className="w-16 h-16 rounded-xl grid place-items-center active:scale-95 transition ease-spring-out border border-hair bg-inset text-ink hover:border-brand-500/55 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"><Minus size={24} /></button>
-      <input type="number" min="0" value={value} onChange={(e) => set(Math.max(0, parseInt(e.target.value, 10) || 0))} className="w-24 text-center font-mono text-4xl font-bold tnum bg-inset border border-hair rounded-xl py-2 text-ink focus:border-brand-500 outline-none transition" />
-      <button onClick={() => set(value + 1)} aria-label="Increase" className="w-16 h-16 rounded-xl grid place-items-center active:scale-95 transition ease-spring-out border border-hair bg-inset text-ink hover:border-brand-500/55 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"><Plus size={24} /></button>
-    </div>
-  );
-
   const chip = (active) => `ease-spring-out ${active ? "border-brand-500 bg-brand-500/[0.10] text-brand-200 ring-1 ring-brand-500/30" : "border-hair bg-inset text-ink-soft hover:border-brand-500/40"}`;
 
   return (
@@ -1211,8 +1255,8 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-6">
         <Panel title="Record Output" tag="IN" className="lg:col-span-7">
-          <label className={labelCls}>Production Date</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} mb-4`} />
+          <label className={labelCls} htmlFor="prod-date">Production Date</label>
+          <input id="prod-date" aria-label="Production date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} mb-4`} />
 
           <label className={labelCls}>Shift</label>
           <div className="grid grid-cols-3 gap-2.5 mb-2">
@@ -1257,8 +1301,8 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
           </div>
 
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <div><label className={labelCls}>Quantity Produced</label><Stepper value={qty} set={setQty} /></div>
-            <div><label className={labelCls}>Scrap (optional)</label><Stepper value={scrap} set={setScrap} /></div>
+            <div><label className={labelCls}>Quantity Produced</label><Stepper value={qty} set={setQty} label="Quantity produced" /></div>
+            <div><label className={labelCls}>Scrap (optional)</label><Stepper value={scrap} set={setScrap} label="Scrap quantity" /></div>
           </div>
 
           {/* WHY scrap happened — only when there IS scrap. Tap-chips (operators won't type). */}
@@ -1273,7 +1317,7 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
             </div>
           )}
 
-          {/* downtime — minutes + WHY the machine stopped (feeds availability / OEE) */}
+          {/* downtime — minutes + WHY the machine stopped (captured for a future availability/OEE rollup — not yet aggregated) */}
           <div className="mb-4">
             <label className={labelCls}>Downtime (optional)</label>
             <div className="flex items-center gap-2 mb-2">
@@ -1292,10 +1336,13 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
           <label className={labelCls}>Notes (optional)</label>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Tool change, machine issue, etc." className={`${inputCls} mb-4 resize-none`} />
 
-          {dup && <div className={`${warnCls} mb-3`}><AlertTriangle size={16} className="shrink-0" /><span>You already logged <b>{compName(componentId)}</b> for Shift {shift} on this date. You'll be asked to confirm.</span></div>}
-          {/* month-boundary guard: a backdated/forward-dated entry SAVES fine but
-              lands in another month's view — say so instead of silently "vanishing" */}
-          {date && date.slice(0, 7) !== curMonth() && <div className={`${warnCls} mb-3`}><Clock size={16} className="shrink-0" /><span>This entry is dated <b>{prettyMonth(date.slice(0, 7))}</b> — it will be saved there and won't show on the current month's dashboard. Use the ‹ › month switcher (managers) to review it.</span></div>}
+          {dup && <div role="status" className={`${warnCls} mb-3`}><AlertTriangle size={16} className="shrink-0" /><span>You already logged <b>{compName(componentId)}</b> for Shift {shift} on this date. You'll be asked to confirm.</span></div>}
+          {/* month-boundary guard: an entry whose date is OUTSIDE the month being
+              viewed saves fine but won't appear in this (viewed-month) list — say so
+              instead of letting it flash in then silently vanish on reload. Compares
+              to the VIEWED `month`, so it also catches a manager logging today while
+              reviewing a past/future month. */}
+          {date && date.slice(0, 7) !== month && <div role="status" className={`${warnCls} mb-3`}><Clock size={16} className="shrink-0" /><span>This entry is dated <b>{prettyMonth(date.slice(0, 7))}</b> — it'll be saved there, not in <b>{prettyMonth(month)}</b> (the month shown), so it won't appear in this list. Switch months to see it.</span></div>}
 
           <LiquidButton onClick={open} disabled={!componentId} size="xl" className="group w-full text-base disabled:opacity-50 disabled:pointer-events-none">Record Output <ArrowRight size={20} className="transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" /></LiquidButton>
         </Panel>
@@ -1380,7 +1427,7 @@ function ShiftEntry({ data, user, reload, month = curMonth() }) {
       <AnimatePresence>
         {editEntry && (
           <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-base/85 p-4" onClick={() => !editBusy && setEditEntry(null)}>
-            <m.div role="dialog" aria-modal="true" aria-labelledby="edit-entry-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10, transition: exitTween(dur.modal) }} transition={spring.modal} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
+            <m.div ref={editDialogRef} role="dialog" aria-modal="true" aria-labelledby="edit-entry-title" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10, transition: exitTween(dur.modal) }} transition={spring.modal} className="bg-over border border-hair-strong relative overflow-hidden rounded-[10px] p-6 w-full max-w-sm shadow-pop" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-1"><h3 id="edit-entry-title" className="font-display font-bold text-lg">Correct entry</h3><button onClick={() => !editBusy && setEditEntry(null)} aria-label="Close" className="p-2 min-h-[44px] min-w-[44px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06]"><X size={18} /></button></div>
               <div className="font-mono text-[11px] text-ink-dim tnum mb-4">{compName(editEntry.component_id)} · {editEntry.production_date} · Shift {editEntry.shift} · {machName(editEntry.machine_id)} · {userName(editEntry.operator_id)}</div>
               <div className="grid grid-cols-2 gap-3 mb-3">
@@ -1614,12 +1661,15 @@ function MachineCosting({ machine, lines, operations, components, reload, target
     const c = compOf(l.component_id);
     const cap = componentCapacity(opsByComp[l.component_id] || [], l.qty);
     const cost = costing({ rate: c.rate || 0, qty: l.qty, hours: cap.total, targetHr });
-    totAmount += cost.amount; totHours += cap.total; totLoss += cost.loss;
+    // Only PRICED parts feed the machine-level KPI. An unpriced part (rate 0) would
+    // otherwise book a full phantom "loss" (targetHr×hours against zero amount) and
+    // drag the hour-rate down — making the header disagree with the per-row "set rate".
+    if (c.rate > 0) { totAmount += cost.amount; totHours += cap.total; totLoss += cost.loss; }
     return { l, c, hours: cap.total, ...cost };
   });
   const machineHr = totHours > 0 ? totAmount / totHours : 0;
-  const machineCost = machineRate * totHours; // ₹/machine-hour × planned hours (the Excel header's "Machine Hour rate")
-  const ratesUnset = totAmount === 0 && totHours > 0;
+  const machineCost = machineRate * totHours; // ₹/machine-hour × PRICED planned hours
+  const ratesUnset = totAmount === 0; // no part priced yet → the KPI would be fiction
   const hrTone = (hr) => hr >= targetHr ? "text-ok-ink" : hr >= targetHr * 0.8 ? "text-warn-ink" : "text-bad-ink";
 
   return (
@@ -1749,11 +1799,11 @@ function MachineSheet({ machine, lines, operations, components, month = curMonth
     const body = rows.map((r) => [r.name, r.op_no, r.cy, r.set, r.ins, r.qty, round2(r.mc), round2(r.lb), round2(r.total), round2(r.eff), round2(r.days), fmtDate(r.start), fmtDate(r.end)]);
     body.push(["Total", "", "", "", "", "", round1(tot.mc), round1(tot.lb), round1(tot.total), round1(tot.eff), round1(tot.days), "", ""]);
     const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
-    const csv = [["Machine", machine.name], ["Month", prettyMonth(curMonth())], [], head, ...body].map((row) => row.map(esc).join(",")).join("\r\n");
+    const csv = [["Machine", machine.name], ["Month", prettyMonth(month)], [], head, ...body].map((row) => row.map(esc).join(",")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `${machine.name.replace(/\s+/g, "_")}-${curMonth()}-plan.csv`; a.click();
+    a.href = url; a.download = `${machine.name.replace(/\s+/g, "_")}-${month}-plan.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -1765,7 +1815,7 @@ function MachineSheet({ machine, lines, operations, components, month = curMonth
   return (
     <Panel title="Sheet — full plan" tag="04" right={
       <div className="flex items-center gap-3">
-        <span className="hidden sm:inline font-mono text-[11px] text-ink-dim">{machine.name} · {prettyMonth(curMonth())}</span>
+        <span className="hidden sm:inline font-mono text-[11px] text-ink-dim">{machine.name} · {prettyMonth(month)}</span>
         <button onClick={exportCsv} className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-inset border border-hair text-ink-soft hover:text-ink hover:border-brand-500/40 transition"><Copy size={13} /> Export Excel</button>
       </div>
     } className="mt-4">
@@ -1899,20 +1949,22 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
   // add-line picker (empty allow-list = all parts) — "if it can't run here, hide it".
   const eligibleComps = activeComps.filter((c) => isAllowedOn(c.id, sel.id, componentMachines));
   const effCompId = eligibleComps.some((c) => c.id === compId) ? compId : (eligibleComps[0]?.id || "");
+  const closed = month < curMonth(); // past month → read-only (the server locks it too); guard handlers + disable controls
 
   const addLine = async () => {
-    if (busy || !effCompId || selDown) return; // never add fresh load onto a DOWN (0-capacity) machine
+    if (busy || !effCompId || selDown || closed) return; // never add to a DOWN (0-cap) machine or a closed month
     const q = cleanPosInt(qty); // reject 0 / blank / negative — never persist a zero-qty plan line
     if (!q) { setErr("Enter a quantity greater than 0."); return; }
     setBusy(true); setErr("");
     try { await db.addMachinePlanLine({ month, machine_id: sel.id, component_id: effCompId, qty: q, seq: lines.length }); setQty(""); await reload(); }
     catch (e) { setErr(e.message || "Failed to add"); } finally { setBusy(false); }
   };
-  const editQty = async (id, v) => { const q = cleanInt(v); if (q === null) return; try { setErr(""); await db.updateMachinePlanLine(id, { qty: q }); await reload(); } catch (e) { setErr(e?.message || "Quantity didn't save — please retry."); } };
+  const editQty = async (id, v) => { if (closed) return; const q = cleanInt(v); if (q === null) return; try { setErr(""); await db.updateMachinePlanLine(id, { qty: q }); await reload(); } catch (e) { setErr(e?.message || "Quantity didn't save — please retry."); } };
   const confirmDel = async () => { if (delBusy || !delLine) return; setDelBusy(true); try { await db.removeMachinePlanLine(delLine.id); await reload(); setDelLine(null); } catch { /* keep */ } finally { setDelBusy(false); } };
   // Run-order control: the Gantt schedules strictly in seq order, so swapping seq
   // with a neighbour is how you say "run part B first" (was delete-and-retype).
   const moveLine = async (l, dirn) => {
+    if (closed) return;
     const idx = lines.findIndex((x) => x.id === l.id);
     const other = lines[idx + dirn];
     if (!other) return;
@@ -1933,6 +1985,8 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
   // --- machine breakdown + flexible re-routing ------------------------------
   const selDown = isDown(sel.id, downSet);
   const toggleDown = async () => {
+    if (closed) { setErr("Past months are read-only — switch to the current month to change machine status."); return; }
+    if (!db.setMachineDown) return; // demo/localDb has no breakdown support — no-op instead of a misleading error
     setDownBusy(true); setErr("");
     try {
       if (selDown) await db.clearMachineDown(sel.id, month);
@@ -1944,12 +1998,14 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
   const seqOn = (plan, machineId) => (plan || []).filter((x) => x.machine_id === machineId).length; // append to a machine's run order
   const reassignCtx = (plan) => ({ machines, machinePlan: plan, operations, componentMachines, downSet, excludeId: sel.id });
   const reassign = async (line, targetId) => {
+    if (closed) return;
     setErr(""); setDownBusy(true);
     try { await db.updateMachinePlanLine(line.id, { machine_id: targetId, seq: seqOn(machinePlan, targetId) }); await reload(); }
     catch (e) { setErr(e?.message || "Move failed — please retry."); }
     finally { setDownBusy(false); }
   };
   const moveAll = async () => {
+    if (closed) return;
     setErr(""); setDownBusy(true);
     try {
       let plan = machinePlan; // local copy so each move sees the prior one (sequential greedy)
@@ -1966,24 +2022,31 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
     finally { await reload().catch(() => {}); setDownBusy(false); }
   };
   const splitLine = async (line) => {
+    if (closed) return;
     setErr(""); setDownBusy(true);
     try {
       const { alloc, unplaced } = suggestSplit({ componentId: line.component_id, ops: compOps(line.component_id), qty: line.qty, ...reassignCtx(machinePlan) });
       if (!alloc.length) { setErr("No eligible free machine can take any of this part."); return; }
       const [first, ...rest] = alloc; // keep the existing line for the first chunk; spill the rest into new lines.
+      // Any pieces that fit NOWHERE (unplaced) must NOT be dropped — park them on the
+      // most-spare machine (first) so the part's total planned qty is preserved (over-
+      // capacity is allowed elsewhere; the planner sees red and rebalances). Without
+      // this, unplaced>0 silently shrank the plan.
+      const firstQty = first.qty + unplaced;
       // Add the spill lines FIRST (purely additive), and only AFTER they all land do
       // we shrink/reassign the ORIGINAL line (the one destructive step). A failure
       // mid-way then leaves the original line at full qty — total planned qty can
       // never silently drop below the original (no lost-quantity-on-partial-failure).
       for (const a of rest) await db.addMachinePlanLine({ month, machine_id: a.machine.id, component_id: line.component_id, qty: a.qty, seq: seqOn(machinePlan, a.machine.id) });
-      await db.updateMachinePlanLine(line.id, { machine_id: first.machine.id, qty: first.qty, seq: seqOn(machinePlan, first.machine.id) });
-      if (unplaced > 0) setErr(`Split placed what fit — ${unplaced} pcs couldn't fit on any free machine (over capacity).`);
+      await db.updateMachinePlanLine(line.id, { machine_id: first.machine.id, qty: firstQty, seq: seqOn(machinePlan, first.machine.id) });
+      if (unplaced > 0) setErr(`Split across machines — ${unplaced} pcs didn't fit anywhere, so they stay on ${first.machine.name} (now overbooked). Rebalance when capacity frees up.`);
     } catch (e) { setErr(e?.message || "Split failed — some lines may not have moved; check the plan below and retry."); }
     finally { await reload().catch(() => {}); setDownBusy(false); } // always refresh so the UI reflects the TRUE db state, even after a partial failure
   };
   // Move a placed line that's no longer allowed on this machine to its best eligible
   // (and fitting) free machine — the one-click fix for an eligibility violation.
   const moveToEligible = async (l) => {
+    if (closed) return;
     const cands = suggestMachines({ componentId: l.component_id, ops: compOps(l.component_id), qty: l.qty, ...reassignCtx(machinePlan) });
     const best = cands.find((c) => c.fits) || cands[0];
     if (!best) { setErr(`${compName(l.component_id)} has no other eligible machine — widen its allowed machines first.`); return; }
@@ -1992,6 +2055,7 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
 
   // --- machine eligibility (which machines a part may run on) ---------------
   const toggleEligibility = async (componentId, machineId) => {
+    if (!db.setAllowedMachines) return; // demo/localDb has no eligibility support — no-op instead of a misleading error
     const cur = new Set(allowedMachines(componentId, componentMachines, active).map((mm) => mm.id));
     const turningOn = !cur.has(machineId);
     if (turningOn) cur.add(machineId); else cur.delete(machineId);
@@ -2031,7 +2095,7 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
             const pct = cap > 0 ? Math.round((d / cap) * 100) : 0;
             const tone = loadTone(pct);
             return (
-              <button key={m.id} onClick={() => setSelId(m.id)} className={`text-left rounded-lg border ${m.id === sel.id ? "border-brand-500 bg-brand-500/[0.06]" : down ? "border-bad/40 bg-bad-soft/20" : tone.ring + " bg-inset/50 hover:border-brand-500/40"} p-3 transition`}>
+              <button key={m.id} onClick={() => setSelId(m.id)} aria-pressed={m.id === sel.id} className={`text-left rounded-lg border ${m.id === sel.id ? "border-brand-500 bg-brand-500/[0.06]" : down ? "border-bad/40 bg-bad-soft/20" : tone.ring + " bg-inset/50 hover:border-brand-500/40"} p-3 transition`}>
                 <div className="flex items-center gap-1.5"><span className="font-semibold text-[13px] text-ink truncate">{m.name}</span>{down && <span className="font-mono text-[9px] uppercase tracking-wider text-bad-ink border border-bad/40 rounded px-1 py-0.5 shrink-0">down</span>}</div>
                 {down
                   ? <div className="mt-1.5 font-mono text-[11px] text-bad-ink">{round1(d)}d stranded · tap to move</div>
@@ -2049,7 +2113,7 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
       {/* selected machine's plan */}
       <Panel title={`Plan — ${sel.name}`} tag="02" right={
         <div className="flex items-center gap-2">
-          <button onClick={toggleDown} disabled={downBusy} className={`text-xs font-semibold px-3 py-2 rounded-lg border transition disabled:opacity-50 ${selDown ? "border-hair text-ok-ink hover:border-brand-500/40" : "border-bad/30 text-bad-ink hover:border-bad/60"}`}>{downBusy ? "…" : selDown ? "Bring back up" : "Mark down"}</button>
+          <button onClick={toggleDown} disabled={downBusy || closed} className={`text-xs font-semibold px-3 py-2 rounded-lg border transition disabled:opacity-50 disabled:pointer-events-none ${selDown ? "border-hair text-ok-ink hover:border-brand-500/40" : "border-bad/30 text-bad-ink hover:border-bad/60"}`}>{downBusy ? "…" : selDown ? "Bring back up" : "Mark down"}</button>
           <select value={selId} onChange={(e) => setSelId(e.target.value)} className="bg-inset border border-hair rounded-lg text-sm text-ink px-3 py-2 font-semibold outline-none focus:border-brand-500 max-w-[160px]">
             {active.map((m) => <option key={m.id} value={m.id}>{m.name}{isDown(m.id, downSet) ? " (down)" : ""}</option>)}
           </select>
@@ -2121,7 +2185,7 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
                           {violates && <button onClick={() => moveToEligible(l)} disabled={downBusy} title={`${compName(l.component_id)} isn't allowed on ${sel.name} — tap to move it to an eligible machine`} className="ml-1 inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-bad-ink border border-bad/40 rounded px-1.5 py-0.5 hover:bg-bad-soft/30 transition disabled:opacity-40"><AlertTriangle size={10} />can't run here · move</button>}
                         </div>
                       </td>
-                      <td className="py-2.5 px-2 text-right"><input type="number" min="0" defaultValue={l.qty} onBlur={(e) => editQty(l.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-24`} /></td>
+                      <td className="py-2.5 px-2 text-right"><input type="number" min="0" defaultValue={l.qty} disabled={closed} onBlur={(e) => editQty(l.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} w-24 disabled:opacity-50`} /></td>
                       <td className="py-2.5 px-2 text-right font-mono text-sm tnum">{ops.length === 0 ? <span className="text-warn-ink" title="No operations defined for this part — define them in Plan Setup → Routing">none</span> : ops.length}</td>
                       <td className="py-2.5 px-2 text-right font-mono font-bold text-brand-300 tnum">{round1(d)}</td>
                       <td className="py-2.5 px-2"><button onClick={() => setDelLine(l)} aria-label="Remove" className="p-2 min-h-[40px] min-w-[40px] grid place-items-center rounded-lg text-ink-dim hover:bg-white/[0.06] hover:text-bad-ink transition"><Trash2 size={14} /></button></td>
@@ -2142,7 +2206,7 @@ function MachineLoading({ data, reload, month = curMonth(), isAdmin = false }) {
           </div>
           <div className="flex gap-2.5 items-end">
             <div className="flex-1"><label className={labelCls}>Qty</label><input type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="140" disabled={selDown} className={inputCls} /></div>
-            <MetalButton onClick={addLine} disabled={!effCompId || !qty || busy || selDown} className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
+            <MetalButton onClick={addLine} disabled={!effCompId || !qty || busy || selDown || closed} className="disabled:opacity-50 disabled:pointer-events-none">{busy ? "…" : <><Plus size={16} /> Add</>}</MetalButton>
           </div>
         </div>
         {/* live LOADABILITY check — can this machine take this part+qty? Hidden when
@@ -2555,8 +2619,9 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth, isAdmin = false
 
   const planFor = (cid) => plans.find((p) => p.component_id === cid);
   const guard = async (fn) => { try { setPErr(""); await fn(); await reload(); } catch (e) { setPErr(e?.message || "That change didn't save — please retry."); } };
-  const changeTarget = (cid, v) => { const t = cleanPosInt(v); if (t === null) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: t, working_days: planFor(cid)?.working_days ?? 24 })); };
-  const changeWD = (cid, v) => { const wd = cleanInt(v); if (!wd) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: planFor(cid)?.target_qty ?? 0, working_days: wd })); };
+  const closed = month < curMonth(); // past month → plan is frozen (server-locked too)
+  const changeTarget = (cid, v) => { if (closed) return; const t = cleanPosInt(v); if (t === null) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: t, working_days: planFor(cid)?.working_days ?? 24 })); };
+  const changeWD = (cid, v) => { if (closed) return; const wd = cleanInt(v); if (!wd) return; guard(() => db.upsertPlan({ month, component_id: cid, target_qty: planFor(cid)?.target_qty ?? 0, working_days: wd })); };
   const editComp = (id, fields) => guard(() => db.updateComponent(id, fields));
   const editRate = (id, v) => { const r = cleanNum(v); if (r === null) return; guard(() => db.setComponentRate(id, r)); };
   const addComponent = async () => { if (!name.trim() || adding) return; setAdding(true); try { await db.addComponent({ code: code.trim(), name: name.trim(), industry }); setName(""); setCode(""); setPErr(""); await reload(); } catch (e) { setPErr(e?.message || "Could not add the component."); } finally { setAdding(false); } };
@@ -2665,8 +2730,8 @@ function PlanSetup({ data, reload, month = curMonth(), setMonth, isAdmin = false
                         {["railway", "wind", "marine", "other"].map((i) => <option key={i} value={i}>{i}</option>)}
                       </select>
                     </td>
-                    <td className="py-3 px-2.5 text-right"><input type="number" min="0" defaultValue={target} onBlur={(e) => changeTarget(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={cellCls} /></td>
-                    <td className="py-3 px-2.5 text-right"><input type="number" min="1" defaultValue={wd} onBlur={(e) => changeWD(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={cellCls} /></td>
+                    <td className="py-3 px-2.5 text-right"><input type="number" min="0" defaultValue={target} disabled={closed} onBlur={(e) => changeTarget(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} disabled:opacity-50`} /></td>
+                    <td className="py-3 px-2.5 text-right"><input type="number" min="1" defaultValue={wd} disabled={closed} onBlur={(e) => changeWD(c.id, e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className={`${cellCls} disabled:opacity-50`} /></td>
                     <td className="py-3 px-2.5 text-right">{isAdmin
                       ? <input type="number" min="0" defaultValue={c.rate || 0} onBlur={(e) => { if ((parseFloat(e.target.value) || 0) !== (c.rate || 0)) editRate(c.id, e.target.value); }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} aria-label={`Rate of ${c.name}`} className={cellCls} />
                       : <span className="font-mono text-sm text-ink-soft tnum" title="Only an admin can change pricing">{c.rate ? inr(c.rate) : "—"}</span>}</td>
